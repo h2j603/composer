@@ -77,7 +77,7 @@ const state = {
   musicKey: 'C',
   bpm: 120,
   isPlaying: false,
-  loopEnabled: false,
+  loopEnabled: true,
   undoStack: [],
   redoStack: [],
   noteIdCounter: 0,
@@ -90,6 +90,11 @@ let isMobile = window.innerWidth <= 640;
 let seqCurrentBar = 0; // which 4-beat bar is shown in step sequencer
 const SEQ_BEATS_PER_BAR = 4;
 const SEQ_TOTAL_BARS = 8;
+
+// Loop section system: song = multiple 4-bar loop sections
+const BEATS_PER_LOOP = 16; // 4 bars × 4 beats = 16 beats per loop
+let currentLoopSection = 0; // which loop section we're editing
+let totalLoopSections = 1; // start with 1 loop, can add more
 
 // init is defined at the bottom of the file
 
@@ -208,7 +213,6 @@ function buildStepSequencer() {
   if (!container) return;
 
   const scale = SCALES[state.musicKey];
-  // Use 1 octave of the scale (enough for mobile, not overwhelming)
   const octave = 4;
   const pitchRows = [];
   for (let i = scale.notes.length - 1; i >= 0; i--) {
@@ -219,7 +223,7 @@ function buildStepSequencer() {
       pitchRows.push({ name: fullName, displayName: noteName, freq, octave, scaleIndex: i });
     }
   }
-  // Add one octave up root for range
+  // Add octave-up root
   const rootUp = `${scale.notes[0]}${octave + 1}`;
   if (NOTE_FREQS[rootUp]) {
     pitchRows.unshift({ name: rootUp, displayName: scale.notes[0], freq: NOTE_FREQS[rootUp], octave: octave + 1, scaleIndex: 0 });
@@ -227,17 +231,32 @@ function buildStepSequencer() {
 
   container._pitchRows = pitchRows;
 
-  // Bar tabs
-  let html = '<div class="seq-bar-tabs">';
-  for (let b = 0; b < SEQ_TOTAL_BARS; b++) {
-    html += `<button class="seq-bar-tab${b === seqCurrentBar ? ' active' : ''}" data-bar="${b}">마디 ${b + 1}</button>`;
+  // Loop section tabs (top level)
+  let html = '<div class="seq-loop-tabs">';
+  for (let s = 0; s < totalLoopSections; s++) {
+    const hasNotes = state.notes.some(n => n.beatPos >= s * BEATS_PER_LOOP && n.beatPos < (s + 1) * BEATS_PER_LOOP);
+    html += `<button class="seq-loop-tab${s === currentLoopSection ? ' active' : ''}${hasNotes ? ' has-notes' : ''}" data-section="${s}">`;
+    html += `Loop ${s + 1}`;
+    html += `</button>`;
   }
+  html += `<button class="seq-loop-tab seq-add-loop" id="seq-add-loop">+</button>`;
+  html += `</div>`;
+
+  // Loop actions bar
+  html += '<div class="seq-loop-actions">';
+  html += `<button class="seq-action-btn" id="seq-duplicate-loop" title="현재 루프를 복제">복제</button>`;
+  html += `<button class="seq-action-btn" id="seq-clear-loop" title="현재 루프 비우기">비우기</button>`;
+  const loopBars = BEATS_PER_LOOP / SEQ_BEATS_PER_BAR; // 4
+  html += `<div class="seq-bar-mini-tabs">`;
+  for (let b = 0; b < loopBars; b++) {
+    const globalBar = currentLoopSection * loopBars + b;
+    html += `<button class="seq-bar-tab${globalBar === seqCurrentBar ? ' active' : ''}" data-bar="${globalBar}">${b + 1}</button>`;
+  }
+  html += `</div>`;
   html += '</div>';
 
   // Grid container
   html += '<div class="seq-grid-container">';
-
-  // Pitch labels
   html += '<div class="seq-pitch-labels">';
   for (const p of pitchRows) {
     const isRoot = p.displayName === scale.notes[0];
@@ -245,7 +264,6 @@ function buildStepSequencer() {
   }
   html += '</div>';
 
-  // Grid
   html += '<div class="seq-grid">';
   for (let r = 0; r < pitchRows.length; r++) {
     html += '<div class="seq-row">';
@@ -262,22 +280,83 @@ function buildStepSequencer() {
   // Beat numbers
   html += '<div class="seq-playhead-row">';
   for (let c = 0; c < SEQ_BEATS_PER_BAR; c++) {
-    const beatNum = c + 1;
-    html += `<div class="seq-beat-num${c === 0 ? ' beat-one' : ''}">${beatNum}</div>`;
+    html += `<div class="seq-beat-num${c === 0 ? ' beat-one' : ''}">${c + 1}</div>`;
   }
   html += '</div>';
 
   container.innerHTML = html;
 
-  // Bind events
+  // Event: loop section tabs
+  container.querySelectorAll('.seq-loop-tab:not(.seq-add-loop)').forEach(tab => {
+    tab.addEventListener('click', () => {
+      currentLoopSection = parseInt(tab.dataset.section);
+      seqCurrentBar = currentLoopSection * (BEATS_PER_LOOP / SEQ_BEATS_PER_BAR); // jump to first bar of this loop
+      buildStepSequencer();
+    });
+  });
+
+  // Event: add new loop
+  document.getElementById('seq-add-loop')?.addEventListener('click', () => {
+    totalLoopSections++;
+    currentLoopSection = totalLoopSections - 1;
+    seqCurrentBar = currentLoopSection * (BEATS_PER_LOOP / SEQ_BEATS_PER_BAR);
+    // Update canvas total beats
+    if (renderer) {
+      renderer.totalBeats = totalLoopSections * BEATS_PER_LOOP;
+      renderer._resize();
+    }
+    buildStepSequencer();
+  });
+
+  // Event: duplicate loop
+  document.getElementById('seq-duplicate-loop')?.addEventListener('click', () => {
+    const srcStart = currentLoopSection * BEATS_PER_LOOP;
+    const srcEnd = srcStart + BEATS_PER_LOOP;
+    const srcNotes = state.notes.filter(n => n.beatPos >= srcStart && n.beatPos < srcEnd);
+
+    totalLoopSections++;
+    const destStart = (totalLoopSections - 1) * BEATS_PER_LOOP;
+
+    saveUndoState();
+    for (const n of srcNotes) {
+      state.notes.push({
+        ...n,
+        id: `note-${++state.noteIdCounter}`,
+        beatPos: n.beatPos - srcStart + destStart,
+      });
+    }
+
+    currentLoopSection = totalLoopSections - 1;
+    seqCurrentBar = currentLoopSection * (BEATS_PER_LOOP / SEQ_BEATS_PER_BAR);
+    if (renderer) {
+      renderer.totalBeats = totalLoopSections * BEATS_PER_LOOP;
+      renderer._resize();
+    }
+    render();
+    buildStepSequencer();
+  });
+
+  // Event: clear loop
+  document.getElementById('seq-clear-loop')?.addEventListener('click', () => {
+    const loopStart = currentLoopSection * BEATS_PER_LOOP;
+    const loopEnd = loopStart + BEATS_PER_LOOP;
+    const toRemove = state.notes.filter(n => n.beatPos >= loopStart && n.beatPos < loopEnd);
+    if (toRemove.length === 0) return;
+    saveUndoState();
+    state.notes = state.notes.filter(n => n.beatPos < loopStart || n.beatPos >= loopEnd);
+    render();
+    buildStepSequencer();
+  });
+
+  // Event: bar tabs
   container.querySelectorAll('.seq-bar-tab').forEach(tab => {
     tab.addEventListener('click', () => {
       seqCurrentBar = parseInt(tab.dataset.bar);
       buildStepSequencer();
-      renderStepSequencer();
     });
   });
 
+  // Event: cell tap (toggle notes)
   container.querySelectorAll('.seq-cell').forEach(cell => {
     cell.addEventListener('click', (e) => {
       e.preventDefault();
@@ -286,7 +365,6 @@ function buildStepSequencer() {
       const pitch = pitchRows[row];
       if (!pitch) return;
 
-      // Check if note exists at this position
       const existing = state.notes.find(n =>
         n.pitchRow === getPitchRowForSeq(pitch) &&
         n.beatPos <= beatPos &&
@@ -294,12 +372,10 @@ function buildStepSequencer() {
       );
 
       if (existing) {
-        // Remove note (toggle off)
         saveUndoState();
         state.notes = state.notes.filter(n => n.id !== existing.id);
         render();
       } else {
-        // Add note
         const note = {
           id: `note-${++state.noteIdCounter}`,
           layerId: state.activeLayerId,
@@ -316,7 +392,7 @@ function buildStepSequencer() {
         state.notes.push(note);
         render();
 
-        // Play preview sound
+        // Play preview
         audioEngine.init().then(() => {
           audioEngine.playNote({
             frequency: note.frequency,
@@ -548,10 +624,13 @@ async function startPlayback() {
 
   const bpm = state.bpm;
   const secondsPerBeat = 60 / bpm;
-  const totalDuration = renderer.totalBeats * secondsPerBeat;
 
-  // Convert notes to audio events
-  const audioNotes = getPlayableNotes(secondsPerBeat);
+  // Play current loop section only
+  const loopStart = currentLoopSection * BEATS_PER_LOOP;
+  const loopEnd = loopStart + BEATS_PER_LOOP;
+  const loopDuration = BEATS_PER_LOOP * secondsPerBeat;
+
+  const audioNotes = getPlayableNotes(secondsPerBeat, loopStart, loopEnd);
 
   if (audioNotes.length === 0) return;
 
@@ -561,27 +640,50 @@ async function startPlayback() {
   const playBtn = document.getElementById('btn-play');
   playBtn.classList.add('playing');
 
-  const playhead = document.getElementById('playhead');
-  playhead.style.display = 'block';
+  if (!isMobile) {
+    const playhead = document.getElementById('playhead');
+    playhead.style.display = 'block';
 
-  audioEngine.onPlayheadUpdate = (progress) => {
-    const px = renderer.progressToPixel(progress);
-    playhead.style.left = px + 'px';
+    audioEngine.onPlayheadUpdate = (progress) => {
+      // Map progress to the loop section's position on canvas
+      const loopProgress = progress;
+      const globalBeat = loopStart + loopProgress * BEATS_PER_LOOP;
+      const px = globalBeat * (renderer ? renderer.cellWidth : 40);
+      playhead.style.left = px + 'px';
 
-    // Auto-scroll
-    const wrapper = document.getElementById('canvas-scroll-wrapper');
-    const scrollLeft = wrapper.scrollLeft;
-    const wrapperWidth = wrapper.clientWidth;
-    if (px > scrollLeft + wrapperWidth - 50 || px < scrollLeft) {
-      wrapper.scrollLeft = px - 50;
-    }
-  };
+      const wrapper = document.getElementById('canvas-scroll-wrapper');
+      if (wrapper) {
+        const scrollLeft = wrapper.scrollLeft;
+        const wrapperWidth = wrapper.clientWidth;
+        if (px > scrollLeft + wrapperWidth - 50 || px < scrollLeft) {
+          wrapper.scrollLeft = px - 50;
+        }
+      }
+    };
+  } else {
+    // Mobile: highlight current beat in step sequencer
+    audioEngine.onPlayheadUpdate = (progress) => {
+      const currentBeat = Math.floor(progress * BEATS_PER_LOOP);
+      highlightSeqBeat(loopStart + currentBeat);
+    };
+  }
 
   audioEngine.onPlaybackEnd = () => {
     stopPlayback();
   };
 
-  audioEngine.play(audioNotes, totalDuration);
+  audioEngine.play(audioNotes, loopDuration);
+}
+
+function highlightSeqBeat(globalBeat) {
+  // Remove previous highlights
+  document.querySelectorAll('.seq-cell.playing').forEach(c => c.classList.remove('playing'));
+  // Highlight cells in the current bar view
+  const barStartBeat = seqCurrentBar * SEQ_BEATS_PER_BAR;
+  const col = globalBeat - barStartBeat;
+  if (col >= 0 && col < SEQ_BEATS_PER_BAR) {
+    document.querySelectorAll(`.seq-cell[data-col="${col}"]`).forEach(c => c.classList.add('playing'));
+  }
 }
 
 function stopPlayback() {
@@ -595,7 +697,7 @@ function stopPlayback() {
   playhead.style.display = 'none';
 }
 
-function getPlayableNotes(secondsPerBeat) {
+function getPlayableNotes(secondsPerBeat, beatStart, beatEnd) {
   const mutedLayers = new Set();
   const soloLayers = new Set();
   for (const layer of state.layers) {
@@ -604,10 +706,17 @@ function getPlayableNotes(secondsPerBeat) {
   }
   const hasSolo = soloLayers.size > 0;
 
+  // If no range specified, play all notes
+  const useRange = beatStart !== undefined && beatEnd !== undefined;
+
   return state.notes
-    .filter(n => hasSolo ? soloLayers.has(n.layerId) : !mutedLayers.has(n.layerId))
+    .filter(n => {
+      if (hasSolo ? !soloLayers.has(n.layerId) : mutedLayers.has(n.layerId)) return false;
+      if (useRange && (n.beatPos < beatStart || n.beatPos >= beatEnd)) return false;
+      return true;
+    })
     .map(n => ({
-      time: n.beatPos * secondsPerBeat,
+      time: (useRange ? n.beatPos - beatStart : n.beatPos) * secondsPerBeat,
       frequency: n.frequency,
       shape: n.shape,
       volume: n.opacity,
@@ -623,7 +732,7 @@ const PRESETS = {
       const notes = [];
       const root = scale.notes[0];
       // Steady pulse rhythm
-      for (let bar = 0; bar < 8; bar++) {
+      for (let bar = 0; bar < 4; bar++) {
         const beat = bar * 4;
         notes.push({ beatPos: beat, pitchIdx: 0, shape: 'hexagon', size: 1, opacity: 0.9, color: '#FF6B6B' });
         notes.push({ beatPos: beat + 1, pitchIdx: 0, shape: 'hexagon', size: 1, opacity: 0.5, color: '#FF8E53' });
@@ -683,7 +792,7 @@ const PRESETS = {
         });
       }
       // Bass foundation
-      for (let bar = 0; bar < 8; bar++) {
+      for (let bar = 0; bar < 4; bar++) {
         notes.push({
           beatPos: bar * 4,
           pitchIdx: 18,
@@ -721,7 +830,7 @@ const PRESETS = {
     generate(scale) {
       const notes = [];
       // Rhythmic electronic pattern
-      for (let bar = 0; bar < 8; bar++) {
+      for (let bar = 0; bar < 4; bar++) {
         const beat = bar * 4;
         // Kick
         notes.push({ beatPos: beat, pitchIdx: 22, shape: 'hexagon', size: 1, opacity: 0.9, color: '#FF6B6B' });
@@ -745,7 +854,7 @@ const PRESETS = {
       const notes = [];
       // Arpeggiated bell pattern (Botanica-inspired - organic, nature-like)
       const scaleLen = scale.notes.length;
-      for (let bar = 0; bar < 8; bar++) {
+      for (let bar = 0; bar < 4; bar++) {
         for (let i = 0; i < 4; i++) {
           const beat = bar * 4 + i;
           // Ascending arpeggio
@@ -850,7 +959,7 @@ const PRESETS = {
       }
 
       // Sub-bass foundation - deep earth vibration
-      for (let bar = 0; bar < 8; bar++) {
+      for (let bar = 0; bar < 4; bar++) {
         if (bar % 2 === 0) {
           notes.push({
             beatPos: bar * 4,
@@ -1806,6 +1915,15 @@ function init() {
       document.getElementById('onboarding').classList.remove('hidden');
     } else {
       document.getElementById('onboarding').classList.add('hidden');
+    }
+
+    // Loop on by default
+    document.getElementById('btn-loop')?.classList.add('active');
+
+    // Set initial canvas size based on loop sections
+    if (renderer) {
+      renderer.totalBeats = totalLoopSections * BEATS_PER_LOOP;
+      renderer._resize();
     }
 
     console.log('SoundCanvas initialized. Mobile:', isMobile, 'Notes:', state.notes.length);

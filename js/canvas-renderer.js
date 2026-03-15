@@ -11,7 +11,7 @@ class CanvasRenderer {
     // Grid settings
     this.cellWidth = 40;   // pixels per beat subdivision
     this.cellHeight = 24;  // pixels per pitch row
-    this.totalBeats = 32;  // 8 bars of 4 beats
+    this.totalBeats = 32;  // default, updated dynamically
     this.totalPitchRows = 24;
     this.gridOffsetX = 0;
 
