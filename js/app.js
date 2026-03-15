@@ -44,28 +44,28 @@ const NOTE_COLORS = [
 ];
 
 const SHAPE_NAMES = {
-  circle: '부드러운 (사인)',
-  square: '전자 (사각파)',
-  triangle: '맑은 (삼각파)',
-  diamond: '날카로운 (톱니파)',
-  star: '벨 (FM)',
-  hexagon: '타악기 (노이즈)',
+  circle: 'Sine (부드러운)',
+  square: 'Square (전자음)',
+  triangle: 'Triangle (맑은)',
+  diamond: 'Sawtooth (날카로운)',
+  star: 'Bell (종소리)',
+  hexagon: 'Percussion (타악기)',
 };
 
 const SIZE_LABELS = {
   1: '16분음표',
   2: '8분음표',
-  4: '4분음표',
-  8: '2분음표',
+  4: '4분음표 (1박)',
+  8: '2분음표 (2박)',
 };
 
 // ====== App State ======
 const state = {
   notes: [],
   layers: [
-    { id: 'layer-1', name: '멜로디', color: '#FF6B6B', muted: false, solo: false },
-    { id: 'layer-2', name: '베이스', color: '#4D96FF', muted: false, solo: false },
-    { id: 'layer-3', name: '리듬', color: '#6BCB77', muted: false, solo: false },
+    { id: 'layer-1', name: '멜로디 (Melody)', color: '#FF6B6B', muted: false, solo: false },
+    { id: 'layer-2', name: '베이스 (Bass)', color: '#4D96FF', muted: false, solo: false },
+    { id: 'layer-3', name: '리듬 (Rhythm)', color: '#6BCB77', muted: false, solo: false },
   ],
   activeLayerId: 'layer-1',
   selectedNoteId: null,
@@ -87,26 +87,7 @@ const state = {
 let renderer;
 let animFrameId;
 
-// ====== Initialization ======
-function init() {
-  const canvas = document.getElementById('main-canvas');
-  renderer = new CanvasRenderer(canvas);
-
-  buildPitchMap();
-  buildPitchLabels();
-  buildBeatLabels();
-  buildColorPalette();
-  updateLayersList();
-  render();
-  bindEvents();
-
-  // Onboarding
-  if (!localStorage.getItem('soundcanvas-seen-onboarding')) {
-    document.getElementById('onboarding').classList.remove('hidden');
-  } else {
-    document.getElementById('onboarding').classList.add('hidden');
-  }
-}
+// init is defined at the bottom of the file
 
 // ====== Pitch Map ======
 function buildPitchMap() {
@@ -146,7 +127,8 @@ function buildPitchLabels() {
     const p = state.pitchMap[i];
     const div = document.createElement('div');
     div.className = 'pitch-label';
-    div.textContent = p.displayName;
+    // Show note name (e.g. C4, D5) - helps learn pitch names
+    div.textContent = p.displayName + (p.octave || '');
     if (p.displayName === SCALES[state.musicKey].notes[0]) {
       div.classList.add('highlight');
     }
@@ -177,6 +159,8 @@ function buildColorPalette() {
   const container = document.getElementById('color-palette');
   container.innerHTML = '';
   const scale = SCALES[state.musicKey];
+  // Solfege names for learning
+  const solfege = ['도', '레', '미', '파', '솔', '라', '시', '도'];
 
   scale.notes.forEach((noteName, i) => {
     const color = NOTE_COLORS[i % NOTE_COLORS.length];
@@ -186,8 +170,9 @@ function buildColorPalette() {
     swatch.style.backgroundColor = color;
     swatch.dataset.color = color;
     swatch.dataset.note = noteName;
-    swatch.title = `${noteName} 음`;
+    swatch.title = `${noteName} (${solfege[i] || ''})`;
 
+    // Show note name label on the swatch
     const label = document.createElement('span');
     label.className = 'swatch-label';
     label.textContent = noteName;
@@ -286,7 +271,10 @@ function updateNoteProperties(note) {
   document.getElementById('prop-pitch').textContent = note.pitchName;
   document.getElementById('prop-instrument').textContent = SHAPE_NAMES[note.shape] || note.shape;
   document.getElementById('prop-duration').textContent = SIZE_LABELS[note.sizeFactor] || `${note.sizeFactor}박`;
-  document.getElementById('prop-volume').textContent = Math.round(note.opacity * 100) + '%';
+  // Volume as musical dynamics terminology
+  const vol = note.opacity;
+  const dynamics = vol < 0.3 ? 'pp (매우 여리게)' : vol < 0.5 ? 'p (여리게)' : vol < 0.7 ? 'mf (조금 세게)' : vol < 0.9 ? 'f (세게)' : 'ff (매우 세게)';
+  document.getElementById('prop-volume').textContent = dynamics;
   document.getElementById('prop-beat').textContent = `${Math.floor(note.beatPos / 4) + 1}마디 ${(note.beatPos % 4) + 1}박`;
 }
 
@@ -358,7 +346,7 @@ function addLayer() {
   const layerNum = state.layers.length + 1;
   const layer = {
     id: `layer-${Date.now()}`,
-    name: `트랙 ${layerNum}`,
+    name: `Track ${layerNum}`,
     color: colors[layerNum % colors.length],
     muted: false,
     solo: false,
@@ -937,10 +925,25 @@ function bindEvents() {
   });
 
   // Tempo
-  document.getElementById('tempo').addEventListener('change', (e) => {
+  const tempoInput = document.getElementById('tempo');
+  const tempoLabel = document.getElementById('tempo-label');
+  function updateTempoLabel(val) {
+    if (!tempoLabel) return;
+    // Show musical tempo marking
+    if (val < 60) tempoLabel.textContent = 'Largo';
+    else if (val < 80) tempoLabel.textContent = 'Adagio';
+    else if (val < 100) tempoLabel.textContent = 'Andante';
+    else if (val < 120) tempoLabel.textContent = 'Moderato';
+    else if (val < 140) tempoLabel.textContent = 'Allegro';
+    else if (val < 170) tempoLabel.textContent = 'Vivace';
+    else tempoLabel.textContent = 'Presto';
+  }
+  tempoInput.addEventListener('change', (e) => {
     state.bpm = Math.max(40, Math.min(240, parseInt(e.target.value) || 120));
     e.target.value = state.bpm;
+    updateTempoLabel(state.bpm);
   });
+  updateTempoLabel(state.bpm);
 
   // Key change
   document.getElementById('music-key').addEventListener('change', (e) => {
@@ -948,6 +951,7 @@ function bindEvents() {
     buildPitchMap();
     buildPitchLabels();
     buildColorPalette();
+    buildChordGuide();
     // Update existing note frequencies
     for (const note of state.notes) {
       const pitch = state.pitchMap[note.pitchRow];
@@ -966,7 +970,7 @@ function bindEvents() {
   // Clear
   document.getElementById('btn-clear').addEventListener('click', () => {
     if (state.notes.length === 0) return;
-    if (confirm('모든 노트를 지우시겠습니까?')) {
+    if (confirm('모든 노트를 지울까요?')) {
       saveUndoState();
       state.notes = [];
       state.selectedNoteId = null;
@@ -1066,10 +1070,162 @@ function bindEvents() {
 
   document.querySelectorAll('.mobile-tool[data-mobile-panel]').forEach(btn => {
     btn.addEventListener('click', () => {
-      // Toggle mobile panels (simplified for mobile)
+      const panel = btn.dataset.mobilePanel;
+      const overlay = document.getElementById('mobile-panel-overlay');
+      const content = document.getElementById('mobile-panel-content');
+      const isActive = btn.classList.contains('active') && overlay.classList.contains('visible');
+
+      // Toggle off if already open
+      if (isActive) {
+        overlay.classList.remove('visible');
+        return;
+      }
+
       document.querySelectorAll('.mobile-tool').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
+
+      content.innerHTML = '';
+
+      if (panel === 'tools') {
+        // Clone shapes + modes
+        content.innerHTML = `
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">도형 = 소리 종류</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">
+            ${['circle','square','triangle','diamond','star','hexagon'].map(s => {
+              const names = {circle:'부드러운',square:'전자',triangle:'맑은',diamond:'날카로운',star:'벨',hexagon:'타악기'};
+              return `<button class="tool-btn mobile-shape-btn ${state.currentShape===s?'active':''}" data-shape="${s}" style="padding:12px 4px">
+                <span style="font-size:13px">${names[s]}</span>
+              </button>`;
+            }).join('')}
+          </div>
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">크기 = 울림 길이</h3>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:16px">
+            ${[{s:1,l:'톡'},{s:2,l:'보통'},{s:4,l:'길게'},{s:8,l:'깔기'}].map(({s,l}) =>
+              `<button class="size-btn mobile-size-btn ${state.currentSize===s?'active':''}" data-size="${s}" style="padding:10px 4px">
+                <div class="size-preview" style="width:${8+s*4}px;height:${8+s*4}px;background:currentColor;border-radius:50%;opacity:0.5"></div>
+                <span>${l}</span>
+              </button>`
+            ).join('')}
+          </div>
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">도구</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
+            <button class="mode-btn mobile-mode-btn ${state.currentMode==='draw'?'active':''}" data-mode="draw" style="padding:10px">그리기</button>
+            <button class="mode-btn mobile-mode-btn ${state.currentMode==='select'?'active':''}" data-mode="select" style="padding:10px">선택</button>
+            <button class="mode-btn mobile-mode-btn ${state.currentMode==='erase'?'active':''}" data-mode="erase" style="padding:10px">지우개</button>
+          </div>
+        `;
+        // Bind mobile shape/size/mode
+        content.querySelectorAll('.mobile-shape-btn').forEach(b => {
+          b.addEventListener('click', () => {
+            content.querySelectorAll('.mobile-shape-btn').forEach(x=>x.classList.remove('active'));
+            b.classList.add('active');
+            state.currentShape = b.dataset.shape;
+            document.querySelectorAll('#toolbar .tool-btn[data-shape]').forEach(x => x.classList.toggle('active', x.dataset.shape === b.dataset.shape));
+          });
+        });
+        content.querySelectorAll('.mobile-size-btn').forEach(b => {
+          b.addEventListener('click', () => {
+            content.querySelectorAll('.mobile-size-btn').forEach(x=>x.classList.remove('active'));
+            b.classList.add('active');
+            state.currentSize = parseInt(b.dataset.size);
+          });
+        });
+        content.querySelectorAll('.mobile-mode-btn').forEach(b => {
+          b.addEventListener('click', () => {
+            content.querySelectorAll('.mobile-mode-btn').forEach(x=>x.classList.remove('active'));
+            b.classList.add('active');
+            setMode(b.dataset.mode);
+          });
+        });
+      } else if (panel === 'colors') {
+        const scale = SCALES[state.musicKey];
+        content.innerHTML = `
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">색상 = 높낮이</h3>
+          <div style="display:grid;grid-template-columns:repeat(${Math.min(scale.notes.length, 5)},1fr);gap:8px;margin-bottom:16px">
+            ${scale.notes.map((n, i) => {
+              const c = NOTE_COLORS[i % NOTE_COLORS.length];
+              return `<div class="color-swatch mobile-color-btn ${state.currentColor===c?'active':''}" data-color="${c}" style="background:${c};aspect-ratio:1;border-radius:10px;cursor:pointer;min-height:44px"></div>`;
+            }).join('')}
+          </div>
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">투명도 = 볼륨</h3>
+          <input type="range" class="styled-range" id="mobile-opacity" min="10" max="100" value="${Math.round(state.currentOpacity*100)}" style="width:100%;margin:8px 0">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)"><span>여리게</span><span>세게</span></div>
+        `;
+        content.querySelectorAll('.mobile-color-btn').forEach(b => {
+          b.addEventListener('click', () => {
+            content.querySelectorAll('.mobile-color-btn').forEach(x=>x.classList.remove('active'));
+            b.classList.add('active');
+            state.currentColor = b.dataset.color;
+          });
+        });
+        const mobileOpacity = content.querySelector('#mobile-opacity');
+        if (mobileOpacity) {
+          mobileOpacity.addEventListener('input', () => {
+            state.currentOpacity = mobileOpacity.value / 100;
+          });
+        }
+      } else if (panel === 'props') {
+        content.innerHTML = `
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">분위기</h3>
+          <select id="mobile-key" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);font-size:14px;margin-bottom:16px;background:var(--bg-surface)">
+            <option value="C" ${state.musicKey==='C'?'selected':''}>밝은</option>
+            <option value="G" ${state.musicKey==='G'?'selected':''}>따뜻한</option>
+            <option value="D" ${state.musicKey==='D'?'selected':''}>힘찬</option>
+            <option value="F" ${state.musicKey==='F'?'selected':''}>편안한</option>
+            <option value="Am" ${state.musicKey==='Am'?'selected':''}>슬픈</option>
+            <option value="Em" ${state.musicKey==='Em'?'selected':''}>어두운</option>
+            <option value="Dm" ${state.musicKey==='Dm'?'selected':''}>감성적</option>
+            <option value="pentatonic" ${state.musicKey==='pentatonic'?'selected':''}>동양적</option>
+          </select>
+          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">속도</h3>
+          <input type="range" class="styled-range" id="mobile-tempo" min="40" max="240" value="${state.bpm}" style="width:100%;margin:8px 0">
+          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)"><span>느리게</span><span id="mobile-tempo-label">${state.bpm < 100 ? '느린' : state.bpm < 130 ? '보통' : '빠른'}</span><span>빠르게</span></div>
+          <div style="margin-top:16px;display:flex;gap:8px">
+            <button id="mobile-undo" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-surface);font-size:13px;cursor:pointer">되돌리기</button>
+            <button id="mobile-clear" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,59,92,0.3);background:rgba(255,59,92,0.08);color:var(--accent);font-size:13px;cursor:pointer">전체 지우기</button>
+          </div>
+        `;
+        const mobileKey = content.querySelector('#mobile-key');
+        mobileKey?.addEventListener('change', () => {
+          state.musicKey = mobileKey.value;
+          document.getElementById('music-key').value = mobileKey.value;
+          buildPitchMap();
+          buildPitchLabels();
+          buildColorPalette();
+          for (const note of state.notes) {
+            const pitch = state.pitchMap[note.pitchRow];
+            if (pitch) { note.pitchName = pitch.name; note.frequency = pitch.freq; }
+          }
+          render();
+        });
+        const mobileTempo = content.querySelector('#mobile-tempo');
+        mobileTempo?.addEventListener('input', () => {
+          const v = parseInt(mobileTempo.value);
+          state.bpm = v;
+          document.getElementById('tempo').value = v;
+          const lbl = content.querySelector('#mobile-tempo-label');
+          if (lbl) lbl.textContent = v < 70 ? '매우 느린' : v < 100 ? '느린' : v < 130 ? '보통' : v < 160 ? '빠른' : '매우 빠른';
+        });
+        content.querySelector('#mobile-undo')?.addEventListener('click', undo);
+        content.querySelector('#mobile-clear')?.addEventListener('click', () => {
+          if (state.notes.length && confirm('모든 도형을 지울까요?')) {
+            saveUndoState();
+            state.notes = [];
+            state.selectedNoteId = null;
+            updateNoteProperties(null);
+            render();
+          }
+        });
+      }
+
+      overlay.classList.add('visible');
     });
+  });
+
+  // Close mobile panel when tapping canvas
+  document.getElementById('canvas-scroll-wrapper')?.addEventListener('pointerdown', () => {
+    const overlay = document.getElementById('mobile-panel-overlay');
+    if (overlay) overlay.classList.remove('visible');
   });
 
   // Window resize
@@ -1119,5 +1275,260 @@ function handleCanvasInteraction(e) {
   }
 }
 
+// ====== Chord Progression System ======
+// Chord degrees for each key (diatonic triads)
+const CHORD_DEGREES = {
+  major: [
+    { degree: 'I', type: 'Major', suffix: '', desc: '으뜸화음 (Tonic) - 안정적' },
+    { degree: 'ii', type: 'minor', suffix: 'm', desc: '윗으뜸화음 - 부드러운 움직임' },
+    { degree: 'iii', type: 'minor', suffix: 'm', desc: '셋째화음 - 감성적' },
+    { degree: 'IV', type: 'Major', suffix: '', desc: '버금딸림화음 (Subdominant) - 편안한' },
+    { degree: 'V', type: 'Major', suffix: '', desc: '딸림화음 (Dominant) - 긴장감' },
+    { degree: 'vi', type: 'minor', suffix: 'm', desc: '여섯째화음 - 슬프고 서정적' },
+    { degree: 'vii°', type: 'dim', suffix: 'dim', desc: '일곱째화음 - 불안한' },
+  ],
+  minor: [
+    { degree: 'i', type: 'minor', suffix: 'm', desc: '으뜸화음 - 어둡고 안정적' },
+    { degree: 'ii°', type: 'dim', suffix: 'dim', desc: '둘째화음 - 불안한' },
+    { degree: 'III', type: 'Major', suffix: '', desc: '셋째화음 - 밝은 전환' },
+    { degree: 'iv', type: 'minor', suffix: 'm', desc: '넷째화음 - 깊은 감정' },
+    { degree: 'v', type: 'minor', suffix: 'm', desc: '다섯째화음 - 긴장' },
+    { degree: 'VI', type: 'Major', suffix: '', desc: '여섯째화음 - 희망적' },
+    { degree: 'VII', type: 'Major', suffix: '', desc: '일곱째화음 - 열린 느낌' },
+  ],
+  pentatonic: [
+    { degree: 'I', type: 'Major', suffix: '', desc: '으뜸화음' },
+    { degree: 'ii', type: 'minor', suffix: 'm', desc: '둘째화음' },
+    { degree: 'IV', type: 'Major', suffix: '', desc: '넷째화음' },
+    { degree: 'V', type: 'Major', suffix: '', desc: '다섯째화음' },
+  ]
+};
+
+// Famous chord progressions
+const FAMOUS_PROGRESSIONS = [
+  { name: 'I - V - vi - IV', desc: '팝 명곡 진행 (캐논 변형)', degrees: [0, 4, 5, 3], emoji: '🎵' },
+  { name: 'I - IV - V - I', desc: '클래식 기본 진행', degrees: [0, 3, 4, 0], emoji: '🎼' },
+  { name: 'vi - IV - I - V', desc: '감성 발라드 진행', degrees: [5, 3, 0, 4], emoji: '💜' },
+  { name: 'I - vi - IV - V', desc: '50s 올디스 진행 (도와프)', degrees: [0, 5, 3, 4], emoji: '🎶' },
+  { name: 'ii - V - I', desc: '재즈 기본 진행', degrees: [1, 4, 0], emoji: '🎷' },
+  { name: 'I - V - vi - iii - IV', desc: '캐논 진행', degrees: [0, 4, 5, 2, 3], emoji: '✨' },
+];
+
+function buildChordGuide() {
+  const guidePanel = document.getElementById('chord-guide-panel');
+  if (!guidePanel) return;
+
+  const scale = SCALES[state.musicKey];
+  const scaleType = scale.type === 'pentatonic' ? 'pentatonic' : scale.type;
+  const degrees = CHORD_DEGREES[scaleType] || CHORD_DEGREES.major;
+
+  // Build chord buttons
+  const chordBtns = document.getElementById('chord-buttons');
+  if (chordBtns) {
+    chordBtns.innerHTML = '';
+    degrees.forEach((chord, idx) => {
+      const root = scale.notes[idx % scale.notes.length];
+      const btn = document.createElement('button');
+      btn.className = 'chord-btn';
+      btn.innerHTML = `
+        <span class="chord-name">${root}${chord.suffix}</span>
+        <span class="chord-degree">${chord.degree}</span>
+        <span class="chord-desc">${chord.desc}</span>
+      `;
+      btn.title = `${root}${chord.suffix} 코드 배치 - ${chord.desc}`;
+      btn.addEventListener('click', () => placeChord(idx, chord));
+      chordBtns.appendChild(btn);
+    });
+  }
+
+  // Build progression list
+  const progList = document.getElementById('progression-list');
+  if (progList) {
+    progList.innerHTML = '';
+    FAMOUS_PROGRESSIONS.forEach(prog => {
+      // Only show progressions that fit the current scale
+      const maxDegree = Math.max(...prog.degrees);
+      if (maxDegree >= degrees.length) return;
+
+      const chordNames = prog.degrees.map(d => {
+        const root = scale.notes[d % scale.notes.length];
+        return root + degrees[d].suffix;
+      }).join(' → ');
+
+      const btn = document.createElement('button');
+      btn.className = 'progression-btn';
+      btn.innerHTML = `
+        <span class="prog-emoji">${prog.emoji}</span>
+        <span class="prog-info">
+          <span class="prog-name">${prog.name}</span>
+          <span class="prog-chords">${chordNames}</span>
+          <span class="prog-desc">${prog.desc}</span>
+        </span>
+      `;
+      btn.addEventListener('click', () => placeProgression(prog, degrees, scale));
+      progList.appendChild(btn);
+    });
+  }
+}
+
+function placeChord(degreeIdx, chordInfo) {
+  const scale = SCALES[state.musicKey];
+  const scaleNotes = scale.notes;
+
+  // Find next available beat position
+  const usedBeats = state.notes.filter(n => n.layerId === state.activeLayerId).map(n => n.beatPos);
+  let startBeat = 0;
+  while (usedBeats.some(b => Math.abs(b - startBeat) < 4)) {
+    startBeat += 4;
+    if (startBeat >= renderer.totalBeats) { startBeat = 0; break; }
+  }
+
+  // Build chord tones (root, 3rd, 5th)
+  const rootIdx = degreeIdx % scaleNotes.length;
+  const thirdIdx = (rootIdx + 2) % scaleNotes.length;
+  const fifthIdx = (rootIdx + 4) % scaleNotes.length;
+
+  saveUndoState();
+
+  // Find pitch rows for these notes
+  const chordTones = [rootIdx, thirdIdx, fifthIdx];
+  chordTones.forEach((noteIdx, i) => {
+    // Find the matching pitch row in the middle register
+    const targetNote = scaleNotes[noteIdx];
+    let bestRow = -1;
+    let bestDist = Infinity;
+    const midRow = Math.floor(renderer.totalPitchRows / 2);
+
+    for (let row = 0; row < state.pitchMap.length; row++) {
+      const p = state.pitchMap[row];
+      if (p.displayName === targetNote) {
+        const dist = Math.abs(row - midRow + i * 2); // spread out slightly
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestRow = row;
+        }
+      }
+    }
+
+    if (bestRow >= 0) {
+      const pitch = state.pitchMap[bestRow];
+      const colors = [NOTE_COLORS[rootIdx % 7], NOTE_COLORS[thirdIdx % 7], NOTE_COLORS[fifthIdx % 7]];
+      const note = {
+        id: `note-${++state.noteIdCounter}`,
+        layerId: state.activeLayerId,
+        beatPos: startBeat,
+        pitchRow: bestRow,
+        shape: state.currentShape,
+        color: colors[i],
+        sizeFactor: 4, // quarter note
+        opacity: state.currentOpacity,
+        pitchName: pitch.name,
+        frequency: pitch.freq,
+      };
+
+      // Check overlap
+      const overlap = state.notes.find(n =>
+        n.layerId === note.layerId && n.pitchRow === note.pitchRow &&
+        n.beatPos < note.beatPos + note.sizeFactor && note.beatPos < n.beatPos + n.sizeFactor
+      );
+      if (!overlap) {
+        state.notes.push(note);
+      }
+    }
+  });
+
+  render();
+
+  // Play preview of the chord
+  audioEngine.init().then(() => {
+    chordTones.forEach((noteIdx, i) => {
+      const targetNote = scaleNotes[noteIdx];
+      for (let row = 0; row < state.pitchMap.length; row++) {
+        if (state.pitchMap[row].displayName === targetNote && state.pitchMap[row].octave === 4) {
+          audioEngine.playNote({
+            frequency: state.pitchMap[row].freq,
+            shape: state.currentShape,
+            volume: state.currentOpacity * 0.4,
+            duration: 0.8,
+          });
+          break;
+        }
+      }
+    });
+  });
+}
+
+function placeProgression(prog, degrees, scale) {
+  saveUndoState();
+
+  prog.degrees.forEach((degIdx, barIdx) => {
+    const startBeat = barIdx * 4;
+    if (startBeat >= renderer.totalBeats) return;
+
+    const scaleNotes = scale.notes;
+    const rootIdx = degIdx % scaleNotes.length;
+    const thirdIdx = (rootIdx + 2) % scaleNotes.length;
+    const fifthIdx = (rootIdx + 4) % scaleNotes.length;
+
+    [rootIdx, thirdIdx, fifthIdx].forEach((noteIdx, i) => {
+      const targetNote = scaleNotes[noteIdx];
+      let bestRow = -1;
+      let bestDist = Infinity;
+      const midRow = Math.floor(renderer.totalPitchRows / 2);
+
+      for (let row = 0; row < state.pitchMap.length; row++) {
+        const p = state.pitchMap[row];
+        if (p.displayName === targetNote) {
+          const dist = Math.abs(row - midRow + i * 2);
+          if (dist < bestDist) { bestDist = dist; bestRow = row; }
+        }
+      }
+
+      if (bestRow >= 0) {
+        const pitch = state.pitchMap[bestRow];
+        const note = {
+          id: `note-${++state.noteIdCounter}`,
+          layerId: state.activeLayerId,
+          beatPos: startBeat,
+          pitchRow: bestRow,
+          shape: state.currentShape,
+          color: NOTE_COLORS[noteIdx % 7],
+          sizeFactor: 4,
+          opacity: state.currentOpacity,
+          pitchName: pitch.name,
+          frequency: pitch.freq,
+        };
+        const overlap = state.notes.find(n =>
+          n.layerId === note.layerId && n.pitchRow === note.pitchRow &&
+          n.beatPos < note.beatPos + note.sizeFactor && note.beatPos < n.beatPos + n.sizeFactor
+        );
+        if (!overlap) state.notes.push(note);
+      }
+    });
+  });
+
+  render();
+}
+
 // ====== Start ======
+function init() {
+  const canvas = document.getElementById('main-canvas');
+  renderer = new CanvasRenderer(canvas);
+
+  buildPitchMap();
+  buildPitchLabels();
+  buildBeatLabels();
+  buildColorPalette();
+  buildChordGuide();
+  updateLayersList();
+  render();
+  bindEvents();
+
+  // Onboarding
+  if (!localStorage.getItem('soundcanvas-seen-onboarding')) {
+    document.getElementById('onboarding').classList.remove('hidden');
+  } else {
+    document.getElementById('onboarding').classList.add('hidden');
+  }
+}
 document.addEventListener('DOMContentLoaded', init);

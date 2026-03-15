@@ -64,33 +64,35 @@ class CanvasRenderer {
     const w = this.width;
     const h = this.height;
 
-    // Background
-    ctx.fillStyle = '#0a0a1a';
+    // Background - light designer-friendly
+    ctx.fillStyle = '#FAFAFA';
     ctx.fillRect(0, 0, w, h);
+
+    // Alternate row shading for readability
+    for (let i = 0; i < this.totalPitchRows; i++) {
+      const y = i * this.cellHeight;
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.015)';
+        ctx.fillRect(0, y, w, this.cellHeight);
+      }
+    }
 
     // Horizontal lines (pitch rows)
     for (let i = 0; i <= this.totalPitchRows; i++) {
       const y = i * this.cellHeight;
-      ctx.strokeStyle = i % 12 === 0 ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.04)';
+      ctx.strokeStyle = i % 12 === 0 ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.04)';
       ctx.lineWidth = i % 12 === 0 ? 1 : 0.5;
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(w, y);
       ctx.stroke();
-
-      // Highlight certain rows (pentatonic-friendly)
-      if ([0, 2, 4, 7, 9, 12, 14, 16, 19, 21].includes(i % 24)) {
-        ctx.fillStyle = 'rgba(233,69,96,0.02)';
-        ctx.fillRect(0, y, w, this.cellHeight);
-      }
     }
 
     // Vertical lines (beat markers)
     for (let i = 0; i <= this.totalBeats; i++) {
       const x = i * this.cellWidth;
       const isBar = i % 4 === 0;
-      const isBeat = i % 1 === 0;
-      ctx.strokeStyle = isBar ? 'rgba(255,255,255,0.15)' : 'rgba(255,255,255,0.05)';
+      ctx.strokeStyle = isBar ? 'rgba(0,0,0,0.12)' : 'rgba(0,0,0,0.04)';
       ctx.lineWidth = isBar ? 1 : 0.5;
       ctx.beginPath();
       ctx.moveTo(x, 0);
@@ -98,8 +100,8 @@ class CanvasRenderer {
       ctx.stroke();
 
       // Bar highlight
-      if (isBar) {
-        ctx.fillStyle = 'rgba(255,255,255,0.01)';
+      if (isBar && (Math.floor(i / 4) % 2 === 0)) {
+        ctx.fillStyle = 'rgba(0,0,0,0.008)';
         ctx.fillRect(x, 0, this.cellWidth * 4, h);
       }
     }
@@ -144,8 +146,8 @@ class CanvasRenderer {
     const r = Math.min(w, h) / 2 - 2;
 
     ctx.fillStyle = color;
-    ctx.strokeStyle = isSelected ? '#ffffff' : 'rgba(255,255,255,0.2)';
-    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeStyle = isSelected ? '#1D1D1F' : 'rgba(0,0,0,0.1)';
+    ctx.lineWidth = isSelected ? 2.5 : 1;
 
     switch (shape) {
       case 'circle':
@@ -200,9 +202,9 @@ class CanvasRenderer {
     // Selected glow
     if (isSelected) {
       ctx.shadowColor = color;
-      ctx.shadowBlur = 12;
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 2;
+      ctx.shadowBlur = 10;
+      ctx.strokeStyle = '#1D1D1F';
+      ctx.lineWidth = 2.5;
       ctx.stroke();
       ctx.shadowBlur = 0;
     }
