@@ -259,6 +259,7 @@ function buildStepSequencer() {
   html += '</div>';
   // Actions
   html += '<div class="seq-actions">';
+  html += `<button class="seq-action-btn" id="seq-play-loop" style="font-size:16px">▶</button>`;
   html += `<button class="seq-action-btn" id="seq-duplicate-loop">복제</button>`;
   html += `<button class="seq-action-btn" id="seq-clear-loop">비우기</button>`;
   html += `<button class="seq-action-btn seq-subdiv-btn${seqSubdivision >= 2 ? ' active' : ''}" id="seq-toggle-subdiv">${seqSubdivision >= 2 ? '×2' : '×1'}</button>`;
@@ -379,25 +380,65 @@ function buildStepSequencer() {
     buildStepSequencer();
   });
 
+  // Inline play button
+  document.getElementById('seq-play-loop')?.addEventListener('click', () => {
+    if (state.isPlaying) {
+      stopPlayback();
+    } else {
+      togglePlay();
+    }
+  });
+
   // Subdivision toggle
   document.getElementById('seq-toggle-subdiv')?.addEventListener('click', () => {
     seqSubdivision = seqSubdivision >= 2 ? 1 : 2;
     buildStepSequencer();
   });
 
-  // Cell tap — toggle note
+  // Cell tap (toggle note) + long-press (velocity adjust)
   container.querySelectorAll('.seq-cell').forEach(cell => {
+    let longPressTimer = null;
+    let isLongPress = false;
+
+    cell.addEventListener('touchstart', (e) => {
+      isLongPress = false;
+      longPressTimer = setTimeout(() => {
+        isLongPress = true;
+        // Long press: show velocity popup for existing note
+        const row = parseInt(cell.dataset.row);
+        const beatPos = parseFloat(cell.dataset.beat);
+        const pitch = pitchRows[row];
+        if (!pitch) return;
+        const pitchRowIdx = getPitchRowForSeq(pitch);
+        const existing = state.notes.find(n =>
+          n.pitchRow === pitchRowIdx && Math.abs(n.beatPos - beatPos) < 0.01
+        );
+        if (existing) {
+          showVelocityPopup(cell, existing);
+        }
+      }, 350);
+    }, { passive: true });
+
+    cell.addEventListener('touchend', () => {
+      clearTimeout(longPressTimer);
+    }, { passive: true });
+
+    cell.addEventListener('touchmove', () => {
+      clearTimeout(longPressTimer);
+    }, { passive: true });
+
     cell.addEventListener('click', (e) => {
       e.preventDefault();
+      if (isLongPress) return; // Ignore click after long press
+
       const row = parseInt(cell.dataset.row);
       const beatPos = parseFloat(cell.dataset.beat);
       const pitch = pitchRows[row];
       if (!pitch) return;
 
       const pitchRowIdx = getPitchRowForSeq(pitch);
-      const stepSize = 1 / seqSubdivision; // note duration = 1 step
+      const stepSize = 1 / seqSubdivision;
 
-      // Find existing note at this position
       const existing = state.notes.find(n =>
         n.pitchRow === pitchRowIdx &&
         Math.abs(n.beatPos - beatPos) < 0.01
@@ -426,7 +467,6 @@ function buildStepSequencer() {
         render();
         renderStepSequencer();
 
-        // Play preview
         audioEngine.init().then(() => {
           audioEngine.playNote({
             frequency: note.frequency,
@@ -439,7 +479,87 @@ function buildStepSequencer() {
     });
   });
 
+  // Horizontal swipe to navigate loop sections
+  const gridWrapper = container.querySelector('.seq-grid-wrapper');
+  if (gridWrapper) {
+    let swipeStartX = 0;
+    let swipeStartY = 0;
+    gridWrapper.addEventListener('touchstart', (e) => {
+      swipeStartX = e.touches[0].clientX;
+      swipeStartY = e.touches[0].clientY;
+    }, { passive: true });
+    gridWrapper.addEventListener('touchend', (e) => {
+      const dx = e.changedTouches[0].clientX - swipeStartX;
+      const dy = e.changedTouches[0].clientY - swipeStartY;
+      // Only trigger if horizontal swipe is dominant and > 60px
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+        if (dx < 0 && currentLoopSection < totalLoopSections - 1) {
+          currentLoopSection++;
+          buildStepSequencer();
+        } else if (dx > 0 && currentLoopSection > 0) {
+          currentLoopSection--;
+          buildStepSequencer();
+        }
+      }
+    }, { passive: true });
+  }
+
   renderStepSequencer();
+}
+
+// Velocity popup for long-press on existing notes
+function showVelocityPopup(cell, note) {
+  // Remove existing popup if any
+  document.querySelector('.seq-velocity-popup')?.remove();
+
+  const popup = document.createElement('div');
+  popup.className = 'seq-velocity-popup';
+  popup.innerHTML = `
+    <input type="range" min="10" max="100" value="${Math.round(note.opacity * 100)}" class="velocity-slider" orient="vertical">
+    <span class="velocity-label">${Math.round(note.opacity * 100)}%</span>
+  `;
+
+  // Position near the cell
+  const rect = cell.getBoundingClientRect();
+  popup.style.position = 'fixed';
+  popup.style.left = (rect.left + rect.width / 2) + 'px';
+  popup.style.top = Math.max(40, rect.top - 110) + 'px';
+  popup.style.transform = 'translateX(-50%)';
+  popup.style.zIndex = '700';
+  popup.style.background = 'var(--bg-surface)';
+  popup.style.border = '1px solid var(--accent)';
+  popup.style.borderRadius = '10px';
+  popup.style.padding = '10px';
+  popup.style.display = 'flex';
+  popup.style.flexDirection = 'column';
+  popup.style.alignItems = 'center';
+  popup.style.gap = '6px';
+  popup.style.boxShadow = '0 4px 20px rgba(0,0,0,0.3)';
+
+  document.body.appendChild(popup);
+
+  const slider = popup.querySelector('.velocity-slider');
+  const label = popup.querySelector('.velocity-label');
+  slider.addEventListener('input', () => {
+    const val = parseInt(slider.value);
+    note.opacity = val / 100;
+    label.textContent = `${val}%`;
+    renderStepSequencer();
+    render();
+  });
+
+  // Close on tap outside
+  const closePopup = (e) => {
+    if (!popup.contains(e.target)) {
+      popup.remove();
+      document.removeEventListener('touchstart', closePopup);
+      document.removeEventListener('click', closePopup);
+    }
+  };
+  setTimeout(() => {
+    document.addEventListener('touchstart', closePopup);
+    document.addEventListener('click', closePopup);
+  }, 100);
 }
 
 function updateCanvasTotalBeats() {
