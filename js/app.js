@@ -325,7 +325,16 @@ function buildStepSequencer() {
   container.querySelectorAll('.seq-loop-tab:not(.seq-add-loop)').forEach(tab => {
     tab.addEventListener('click', () => {
       currentLoopSection = parseInt(tab.dataset.section);
-      buildStepSequencer();
+      // Update tab active state without full rebuild
+      container.querySelectorAll('.seq-loop-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      // Update cell data-beat attributes for new loop section
+      const newLoopStart = currentLoopSection * BEATS_PER_LOOP;
+      container.querySelectorAll('.seq-cell').forEach(c => {
+        const col = parseInt(c.dataset.col);
+        c.dataset.beat = newLoopStart + col / seqSubdivision;
+      });
+      renderStepSequencer();
     });
   });
 
@@ -852,26 +861,26 @@ const PRESETS = {
     name: '빗방울',
     generate(scale) {
       const notes = [];
-      // Random high pitched droplets
-      for (let i = 0; i < 32; i++) {
-        const beat = i;
-        if (Math.random() > 0.5) {
-          const pitchIdx = Math.floor(Math.random() * 5);
-          notes.push({
-            beatPos: beat,
-            pitchIdx,
-            shape: 'star',
-            size: 1,
-            opacity: 0.2 + Math.random() * 0.4,
-            color: '#4D96FF'
-          });
-        }
+      // Deterministic droplet pattern using golden ratio hash
+      const dropBeats = [0,3,5,6,9,11,13,14,17,19,21,23,25,27,29,31];
+      const dropPitches = [0,3,1,4,2,0,3,1,4,2,0,3,1,4,2,0];
+      const dropOpacities = [0.4,0.3,0.5,0.25,0.45,0.35,0.5,0.3,0.4,0.25,0.45,0.35,0.3,0.5,0.4,0.25];
+      for (let i = 0; i < dropBeats.length; i++) {
+        notes.push({
+          beatPos: dropBeats[i],
+          pitchIdx: dropPitches[i],
+          shape: 'star',
+          size: 1,
+          opacity: dropOpacities[i],
+          color: '#4D96FF'
+        });
       }
       // Sustained ambient pad
+      const padPitches = [12, 14, 13, 15];
       for (let bar = 0; bar < 4; bar++) {
         notes.push({
           beatPos: bar * 8,
-          pitchIdx: 12 + Math.floor(Math.random() * 4),
+          pitchIdx: padPitches[bar],
           shape: 'circle',
           size: 8,
           opacity: 0.25,
@@ -1036,7 +1045,7 @@ const PRESETS = {
         const pitchIdx = 4 + melodyPattern[i] * 2;
         const beat = i * 2;
         if (beat >= 32) break;
-        if (Math.random() > 0.15) { // slight organic randomness
+        if (i % 7 !== 3) { // deterministic organic gaps (skip every 7th from offset 3)
           notes.push({
             beatPos: beat,
             pitchIdx: Math.min(23, pitchIdx),
@@ -1057,7 +1066,7 @@ const PRESETS = {
             pitchIdx: 2 + Math.floor(Math.sin(i * 0.7) * 2 + 2),
             shape: 'star',
             size: 1,
-            opacity: 0.15 + Math.random() * 0.2,
+            opacity: 0.15 + Math.abs(Math.sin(i * 1.3)) * 0.2,
             color: '#FFD93D',
             layer: 'layer-3'
           });
