@@ -240,13 +240,10 @@ class CanvasRenderer {
    */
   canvasToGrid(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
-    // Account for scroll offset within the wrapper
-    const wrapper = this.canvas.parentElement;
-    const scrollLeft = wrapper ? wrapper.scrollLeft : 0;
-    const scrollTop = wrapper ? wrapper.scrollTop : 0;
-
-    const x = clientX - rect.left + scrollLeft;
-    const y = clientY - rect.top + scrollTop;
+    // clientX/Y are viewport coordinates, rect.left/top are viewport coordinates of canvas
+    // This gives us the position relative to the canvas element
+    const x = clientX - rect.left;
+    const y = clientY - rect.top;
 
     const beatPos = Math.floor(x / this.cellWidth);
     const pitchRow = Math.floor(y / this.cellHeight);

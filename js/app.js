@@ -842,20 +842,48 @@ function importProject(file) {
 // ====== Event Binding ======
 function bindEvents() {
   const canvas = document.getElementById('main-canvas');
+  const wrapper = document.getElementById('canvas-scroll-wrapper');
 
   // Canvas interaction
   let isDragging = false;
-  let lastDrawnCell = null; // prevent drawing on same cell repeatedly
+  let lastDrawnCell = null;
+  let handledByPointer = false; // track if pointerdown already handled this tap
 
-  canvas.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // Show visual tap feedback on canvas
+  function showTapFeedback(clientX, clientY) {
+    const rect = wrapper.getBoundingClientRect();
+    const dot = document.createElement('div');
+    dot.className = 'tap-feedback';
+    dot.style.left = (clientX - rect.left) + 'px';
+    dot.style.top = (clientY - rect.top) + 'px';
+    wrapper.appendChild(dot);
+    setTimeout(() => dot.remove(), 400);
+  }
+
+  function handleTap(e) {
     // Close mobile panel if open
     const overlay = document.getElementById('mobile-panel-overlay');
     if (overlay) overlay.classList.remove('visible');
 
-    lastDrawnCell = null;
+    // Dismiss onboarding if visible
+    const onboarding = document.getElementById('onboarding');
+    if (onboarding && !onboarding.classList.contains('hidden')) {
+      onboarding.classList.add('hidden');
+      localStorage.setItem('soundcanvas-seen-onboarding', '1');
+      return; // Don't place note on first tap that dismisses onboarding
+    }
+
+    showTapFeedback(e.clientX, e.clientY);
     handleCanvasInteraction(e);
+  }
+
+  // Pointer events (desktop + modern mobile)
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    handledByPointer = true;
+    lastDrawnCell = null;
+    handleTap(e);
     isDragging = true;
   });
 
@@ -863,7 +891,6 @@ function bindEvents() {
     if (!isDragging) return;
     e.preventDefault();
     if (state.currentMode === 'draw' || state.currentMode === 'erase') {
-      // Only handle if moved to a new cell
       const { beatPos, pitchRow } = renderer.canvasToGrid(e.clientX, e.clientY);
       const cellKey = `${beatPos}-${pitchRow}`;
       if (cellKey !== lastDrawnCell) {
@@ -883,9 +910,53 @@ function bindEvents() {
     lastDrawnCell = null;
   });
 
-  // Prevent default touch behavior on canvas (critical for mobile)
-  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
-  canvas.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
+  // Touch event fallback — handles mobile browsers where pointer events may not fire
+  canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (handledByPointer) {
+      handledByPointer = false;
+      return; // Already handled by pointerdown
+    }
+    const touch = e.touches[0];
+    if (touch) {
+      const syntheticEvent = { clientX: touch.clientX, clientY: touch.clientY };
+      handleTap(syntheticEvent);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', (e) => {
+    e.preventDefault();
+    if (state.currentMode === 'draw' || state.currentMode === 'erase') {
+      const touch = e.touches[0];
+      if (touch) {
+        const { beatPos, pitchRow } = renderer.canvasToGrid(touch.clientX, touch.clientY);
+        const cellKey = `${beatPos}-${pitchRow}`;
+        if (cellKey !== lastDrawnCell) {
+          lastDrawnCell = cellKey;
+          handleCanvasInteraction({ clientX: touch.clientX, clientY: touch.clientY });
+        }
+      }
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', () => {
+    isDragging = false;
+    lastDrawnCell = null;
+    handledByPointer = false;
+  }, { passive: false });
+
+  // Click fallback for any browser that doesn't fire touch/pointer properly
+  canvas.addEventListener('click', (e) => {
+    // Only use as last resort — if no note was placed by pointer/touch
+    if (!handledByPointer) {
+      handleTap(e);
+    }
+    handledByPointer = false;
+  });
+
+  // Also prevent wrapper from stealing touches
+  wrapper.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
+  wrapper.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
   // Shape buttons
   document.querySelectorAll('.tool-btn[data-shape]').forEach(btn => {
@@ -1077,10 +1148,13 @@ function bindEvents() {
   });
 
   // Onboarding
-  document.getElementById('onboarding-close').addEventListener('click', () => {
+  // Close onboarding — both button and tapping anywhere on overlay
+  const closeOnboarding = () => {
     document.getElementById('onboarding').classList.add('hidden');
     localStorage.setItem('soundcanvas-seen-onboarding', '1');
-  });
+  };
+  document.getElementById('onboarding-close').addEventListener('click', closeOnboarding);
+  document.getElementById('onboarding').addEventListener('click', closeOnboarding);
 
   // Mobile toolbar
   document.getElementById('mobile-play')?.addEventListener('click', togglePlay);
@@ -1244,11 +1318,7 @@ function bindEvents() {
     });
   });
 
-  // Close mobile panel when tapping canvas
-  document.getElementById('canvas-scroll-wrapper')?.addEventListener('pointerdown', () => {
-    const overlay = document.getElementById('mobile-panel-overlay');
-    if (overlay) overlay.classList.remove('visible');
-  });
+  // Mobile panel closing is now handled inside the canvas handleTap function
 
   // Window resize
   window.addEventListener('resize', () => {
@@ -1292,30 +1362,36 @@ function updateMobileToolIndicator() {
 }
 
 function handleCanvasInteraction(e) {
-  const canvas = document.getElementById('main-canvas');
-  const { beatPos, pitchRow } = renderer.canvasToGrid(e.clientX, e.clientY);
+  try {
+    if (!renderer) return;
+    const { beatPos, pitchRow } = renderer.canvasToGrid(e.clientX, e.clientY);
 
-  switch (state.currentMode) {
-    case 'draw': {
-      const existingNote = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
-      if (existingNote) {
-        selectNote(existingNote);
-        return;
+    switch (state.currentMode) {
+      case 'draw': {
+        const existingNote = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
+        if (existingNote) {
+          selectNote(existingNote);
+          return;
+        }
+        const note = createNote(beatPos, pitchRow);
+        if (note) {
+          addNote(note);
+        }
+        break;
       }
-      const note = createNote(beatPos, pitchRow);
-      addNote(note);
-      break;
+      case 'select': {
+        const note = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
+        selectNote(note);
+        break;
+      }
+      case 'erase': {
+        const note = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
+        if (note) deleteNote(note.id);
+        break;
+      }
     }
-    case 'select': {
-      const note = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
-      selectNote(note);
-      break;
-    }
-    case 'erase': {
-      const note = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
-      if (note) deleteNote(note.id);
-      break;
-    }
+  } catch (err) {
+    console.error('handleCanvasInteraction error:', err);
   }
 }
 
@@ -1556,23 +1632,43 @@ function placeProgression(prog, degrees, scale) {
 
 // ====== Start ======
 function init() {
-  const canvas = document.getElementById('main-canvas');
-  renderer = new CanvasRenderer(canvas);
+  try {
+    const canvas = document.getElementById('main-canvas');
+    if (!canvas) {
+      console.error('SoundCanvas: canvas element not found');
+      return;
+    }
+    renderer = new CanvasRenderer(canvas);
 
-  buildPitchMap();
-  buildPitchLabels();
-  buildBeatLabels();
-  buildColorPalette();
-  buildChordGuide();
-  updateLayersList();
-  render();
-  bindEvents();
+    buildPitchMap();
+    buildPitchLabels();
+    buildBeatLabels();
+    buildColorPalette();
+    buildChordGuide();
+    updateLayersList();
+    render();
+    bindEvents();
 
-  // Onboarding
-  if (!localStorage.getItem('soundcanvas-seen-onboarding')) {
-    document.getElementById('onboarding').classList.remove('hidden');
-  } else {
-    document.getElementById('onboarding').classList.add('hidden');
+    // Onboarding
+    if (!localStorage.getItem('soundcanvas-seen-onboarding')) {
+      document.getElementById('onboarding').classList.remove('hidden');
+    } else {
+      document.getElementById('onboarding').classList.add('hidden');
+    }
+
+    console.log('SoundCanvas initialized. Notes:', state.notes.length, 'PitchMap:', state.pitchMap.length, 'Mode:', state.currentMode);
+  } catch (err) {
+    console.error('SoundCanvas init error:', err);
+    // Show error visually so mobile users can see it
+    const errDiv = document.createElement('div');
+    errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:12px;background:red;color:white;font-size:14px;z-index:9999;';
+    errDiv.textContent = 'Error: ' + err.message;
+    document.body.appendChild(errDiv);
   }
 }
 document.addEventListener('DOMContentLoaded', init);
+
+// Global error handler for mobile debugging
+window.addEventListener('error', (e) => {
+  console.error('Global error:', e.message, e.filename, e.lineno);
+});

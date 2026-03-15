@@ -429,6 +429,7 @@ html, body {
   flex: 1;
   position: relative;
   overflow-x: auto;
+  touch-action: none;
   overflow-y: hidden;
   scrollbar-width: thin;
   scrollbar-color: var(--border-color) transparent;
@@ -877,6 +878,7 @@ html, body {
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border-color);
   font-size: 12px;
+  pointer-events: none; /* Don't block canvas taps */
   color: var(--text-secondary);
   gap: 8px;
   align-items: center;
@@ -993,6 +995,24 @@ html, body {
   50% { opacity: 0.5; }
 }
 .playing-indicator { animation: pulse 0.8s ease-in-out infinite; }
+
+/* Tap feedback indicator */
+.tap-feedback {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
+  transform: translate(-50%, -50%) scale(1);
+  animation: tapFade 0.4s ease-out forwards;
+  z-index: 5;
+}
+@keyframes tapFade {
+  0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0.6; }
+  100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+}
 
 /* ====== Tempo Input ====== */
 .tempo-input {
