@@ -78,6 +78,7 @@ const state = {
   bpm: 120,
   isPlaying: false,
   loopEnabled: true,
+  swing: 0, // 0-100, percentage of swing feel
   undoStack: [],
   redoStack: [],
   noteIdCounter: 0,
@@ -422,7 +423,7 @@ function buildStepSequencer() {
             frequency: note.frequency,
             shape: note.shape,
             duration: 0.15,
-            velocity: note.opacity,
+            volume: note.opacity,
           });
         });
       }
@@ -568,25 +569,51 @@ function updateNoteProperties(note) {
 
 // ====== Undo/Redo ======
 function saveUndoState() {
-  state.undoStack.push(JSON.stringify(state.notes));
+  state.undoStack.push(JSON.stringify({
+    notes: state.notes,
+    totalLoopSections,
+    currentLoopSection,
+  }));
   if (state.undoStack.length > 50) state.undoStack.shift();
   state.redoStack = [];
 }
 
 function undo() {
   if (state.undoStack.length === 0) return;
-  state.redoStack.push(JSON.stringify(state.notes));
-  state.notes = JSON.parse(state.undoStack.pop());
+  state.redoStack.push(JSON.stringify({
+    notes: state.notes,
+    totalLoopSections,
+    currentLoopSection,
+  }));
+  const snapshot = JSON.parse(state.undoStack.pop());
+  state.notes = snapshot.notes;
+  if (snapshot.totalLoopSections !== undefined) {
+    totalLoopSections = snapshot.totalLoopSections;
+    currentLoopSection = snapshot.currentLoopSection;
+    updateCanvasTotalBeats();
+  }
   state.selectedNoteId = null;
   updateNoteProperties(null);
   render();
+  if (isMobile) buildStepSequencer();
 }
 
 function redo() {
   if (state.redoStack.length === 0) return;
-  state.undoStack.push(JSON.stringify(state.notes));
-  state.notes = JSON.parse(state.redoStack.pop());
+  state.undoStack.push(JSON.stringify({
+    notes: state.notes,
+    totalLoopSections,
+    currentLoopSection,
+  }));
+  const snapshot = JSON.parse(state.redoStack.pop());
+  state.notes = snapshot.notes;
+  if (snapshot.totalLoopSections !== undefined) {
+    totalLoopSections = snapshot.totalLoopSections;
+    currentLoopSection = snapshot.currentLoopSection;
+    updateCanvasTotalBeats();
+  }
   render();
+  if (isMobile) buildStepSequencer();
 }
 
 // ====== Layers ======
@@ -780,13 +807,27 @@ function getPlayableNotes(secondsPerBeat, beatStart, beatEnd) {
       if (useRange && (n.beatPos < beatStart || n.beatPos >= beatEnd)) return false;
       return true;
     })
-    .map(n => ({
-      time: (useRange ? n.beatPos - beatStart : n.beatPos) * secondsPerBeat,
-      frequency: n.frequency,
-      shape: n.shape,
-      volume: n.opacity,
-      duration: n.sizeFactor * secondsPerBeat,
-    }));
+    .map(n => {
+      const baseBeat = useRange ? n.beatPos - beatStart : n.beatPos;
+      let time = baseBeat * secondsPerBeat;
+
+      // Apply swing: offset every "off-beat" (odd 8th notes)
+      if (state.swing > 0) {
+        const eighthBeat = baseBeat * 2; // position in 8th notes
+        const isOffBeat = Math.abs(eighthBeat - Math.round(eighthBeat)) < 0.01 && Math.round(eighthBeat) % 2 === 1;
+        if (isOffBeat) {
+          time += (state.swing / 100) * secondsPerBeat * 0.33;
+        }
+      }
+
+      return {
+        time,
+        frequency: n.frequency,
+        shape: n.shape,
+        volume: n.opacity,
+        duration: n.sizeFactor * secondsPerBeat,
+      };
+    });
 }
 
 // ====== Presets (including Botanica) ======
@@ -1623,6 +1664,9 @@ function bindEvents() {
           <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">BPM (속도)</h3>
           <input type="range" class="styled-range" id="mobile-tempo" min="40" max="240" value="${state.bpm}" style="width:100%;margin:10px 0;height:6px">
           <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>Largo</span><span id="mobile-tempo-label">${state.bpm} BPM</span><span>Presto</span></div>
+          <h3 style="font-size:14px;font-weight:700;margin:18px 0 12px">스윙 (Groove)</h3>
+          <input type="range" class="styled-range" id="mobile-swing" min="0" max="80" value="${state.swing}" style="width:100%;margin:10px 0;height:6px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>직선적</span><span id="mobile-swing-label">${state.swing}%</span><span>그루비</span></div>
           <div style="margin-top:20px;display:flex;gap:8px">
             <button id="mobile-undo" style="flex:1;padding:14px;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-surface);font-size:14px;cursor:pointer;font-weight:600;min-height:48px">되돌리기</button>
             <button id="mobile-clear" style="flex:1;padding:14px;border-radius:10px;border:1px solid rgba(255,59,92,0.3);background:rgba(255,59,92,0.08);color:var(--accent);font-size:14px;cursor:pointer;font-weight:600;min-height:48px">전체 지우기</button>
@@ -1644,6 +1688,12 @@ function bindEvents() {
           document.getElementById('tempo').value = v;
           const lbl = content.querySelector('#mobile-tempo-label');
           if (lbl) lbl.textContent = `${v} BPM`;
+        });
+        const mobileSwing = content.querySelector('#mobile-swing');
+        mobileSwing?.addEventListener('input', () => {
+          state.swing = parseInt(mobileSwing.value);
+          const lbl = content.querySelector('#mobile-swing-label');
+          if (lbl) lbl.textContent = `${state.swing}%`;
         });
         content.querySelector('#mobile-undo')?.addEventListener('click', () => { undo(); overlay.classList.remove('visible'); });
         content.querySelector('#mobile-clear')?.addEventListener('click', () => {
