@@ -259,6 +259,7 @@ function buildStepSequencer() {
   html += '</div>';
   // Actions
   html += '<div class="seq-actions">';
+  html += `<span class="seq-beat-counter" id="seq-beat-counter" style="font-size:11px;color:var(--text-muted);min-width:40px;text-align:center;font-variant-numeric:tabular-nums"></span>`;
   html += `<button class="seq-action-btn" id="seq-play-loop" style="font-size:16px">▶</button>`;
   html += `<button class="seq-action-btn" id="seq-duplicate-loop">복제</button>`;
   html += `<button class="seq-action-btn" id="seq-clear-loop">비우기</button>`;
@@ -479,6 +480,70 @@ function buildStepSequencer() {
     });
   });
 
+  // Touch-drag for continuous note drawing
+  const seqGrid = document.getElementById('seq-grid');
+  if (seqGrid) {
+    let isDragDrawing = false;
+    let dragDrawnCells = new Set();
+
+    seqGrid.addEventListener('touchstart', (e) => {
+      isDragDrawing = false;
+      dragDrawnCells.clear();
+    }, { passive: true });
+
+    seqGrid.addEventListener('touchmove', (e) => {
+      const touch = e.touches[0];
+      const elem = document.elementFromPoint(touch.clientX, touch.clientY);
+      const cell = elem?.closest('.seq-cell');
+      if (!cell) return;
+
+      const cellKey = `${cell.dataset.row}-${cell.dataset.col}`;
+      if (dragDrawnCells.has(cellKey)) return;
+
+      if (!isDragDrawing) {
+        isDragDrawing = true;
+        saveUndoState();
+      }
+      dragDrawnCells.add(cellKey);
+
+      const row = parseInt(cell.dataset.row);
+      const beatPos = parseFloat(cell.dataset.beat);
+      const pitch = pitchRows[row];
+      if (!pitch) return;
+
+      const pitchRowIdx = getPitchRowForSeq(pitch);
+      const stepSize = 1 / seqSubdivision;
+
+      // Only add if no existing note
+      const exists = state.notes.some(n =>
+        n.pitchRow === pitchRowIdx && Math.abs(n.beatPos - beatPos) < 0.01
+      );
+      if (!exists) {
+        state.notes.push({
+          id: `note-${++state.noteIdCounter}`,
+          layerId: state.activeLayerId,
+          beatPos,
+          pitchRow: pitchRowIdx,
+          shape: state.currentShape,
+          color: NOTE_COLORS[pitch.scaleIndex % NOTE_COLORS.length],
+          sizeFactor: stepSize,
+          opacity: state.currentOpacity,
+          pitchName: pitch.name,
+          frequency: pitch.freq,
+        });
+        renderStepSequencer();
+      }
+    }, { passive: true });
+
+    seqGrid.addEventListener('touchend', () => {
+      if (isDragDrawing) {
+        render(); // Sync canvas after drag
+      }
+      isDragDrawing = false;
+      dragDrawnCells.clear();
+    }, { passive: true });
+  }
+
   // Horizontal swipe to navigate loop sections
   const gridWrapper = container.querySelector('.seq-grid-wrapper');
   if (gridWrapper) {
@@ -600,10 +665,14 @@ function renderStepSequencer() {
       cell.classList.add('active');
       dot.style.display = 'block';
       dot.style.background = note.color;
-      dot.style.opacity = note.opacity;
+      dot.style.opacity = Math.max(0.4, note.opacity);
+      // Scale dot size: 60% at min velocity → 100% at max
+      const scale = 0.6 + note.opacity * 0.4;
+      dot.style.transform = `scale(${scale})`;
     } else {
       cell.classList.remove('active');
       dot.style.display = 'none';
+      dot.style.transform = '';
     }
 
     // Playback highlight
@@ -850,11 +919,17 @@ async function startPlayback() {
       }
     };
   } else {
-    // Mobile: highlight column in step sequencer
+    // Mobile: highlight column in step sequencer + beat counter
     const totalCols = BEATS_PER_LOOP * seqSubdivision;
+    const playLoopBtn = document.getElementById('seq-play-loop');
+    if (playLoopBtn) playLoopBtn.textContent = '⏸';
     audioEngine.onPlayheadUpdate = (progress) => {
       const col = Math.floor(progress * totalCols) % totalCols;
       highlightSeqCol(col);
+      // Update beat counter
+      const beatNum = Math.floor(col / seqSubdivision) + 1;
+      const counter = document.getElementById('seq-beat-counter');
+      if (counter) counter.textContent = `${beatNum}/${BEATS_PER_LOOP}`;
     };
   }
 
@@ -916,6 +991,12 @@ function stopPlayback() {
   if (playhead) playhead.style.display = 'none';
 
   clearSeqPlayhead();
+
+  // Reset inline play button and beat counter
+  const playLoopBtn = document.getElementById('seq-play-loop');
+  if (playLoopBtn) playLoopBtn.textContent = '▶';
+  const counter = document.getElementById('seq-beat-counter');
+  if (counter) counter.textContent = '';
 }
 
 function getPlayableNotes(secondsPerBeat, beatStart, beatEnd) {
