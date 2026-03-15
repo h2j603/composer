@@ -1,0 +1,1123 @@
+/**
+ * SoundCanvas - Main Application
+ * 그래픽 디자이너를 위한 음악 작곡 앱
+ */
+
+// ====== Music Theory Data ======
+const SCALES = {
+  C:  { name: 'C 장조', notes: ['C','D','E','F','G','A','B'], type: 'major' },
+  G:  { name: 'G 장조', notes: ['G','A','B','C','D','E','F#'], type: 'major' },
+  D:  { name: 'D 장조', notes: ['D','E','F#','G','A','B','C#'], type: 'major' },
+  F:  { name: 'F 장조', notes: ['F','G','A','Bb','C','D','E'], type: 'major' },
+  Am: { name: 'A 단조', notes: ['A','B','C','D','E','F','G'], type: 'minor' },
+  Em: { name: 'E 단조', notes: ['E','F#','G','A','B','C','D'], type: 'minor' },
+  Dm: { name: 'D 단조', notes: ['D','E','F','G','A','Bb','C'], type: 'minor' },
+  pentatonic: { name: '펜타토닉', notes: ['C','D','E','G','A'], type: 'pentatonic' },
+};
+
+// Note frequencies (all octaves)
+const NOTE_FREQS = {};
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const FLAT_NAMES = { 'C#':'Db','D#':'Eb','F#':'Gb','G#':'Ab','A#':'Bb' };
+
+for (let octave = 1; octave <= 7; octave++) {
+  for (let i = 0; i < 12; i++) {
+    const note = NOTE_NAMES[i];
+    const freq = 440 * Math.pow(2, (octave - 4) + (i - 9) / 12);
+    NOTE_FREQS[`${note}${octave}`] = freq;
+    if (FLAT_NAMES[note]) {
+      NOTE_FREQS[`${FLAT_NAMES[note]}${octave}`] = freq;
+    }
+  }
+}
+
+// Color palette for notes (warm to cool spectrum - designer friendly)
+const NOTE_COLORS = [
+  '#FF6B6B', // Red - C / Do
+  '#FF8E53', // Orange
+  '#FFD93D', // Yellow
+  '#6BCB77', // Green
+  '#4D96FF', // Blue
+  '#9B59B6', // Purple
+  '#E91E9C', // Magenta
+  '#FF6B6B', // loop back
+];
+
+const SHAPE_NAMES = {
+  circle: '부드러운 (사인)',
+  square: '전자 (사각파)',
+  triangle: '맑은 (삼각파)',
+  diamond: '날카로운 (톱니파)',
+  star: '벨 (FM)',
+  hexagon: '타악기 (노이즈)',
+};
+
+const SIZE_LABELS = {
+  1: '16분음표',
+  2: '8분음표',
+  4: '4분음표',
+  8: '2분음표',
+};
+
+// ====== App State ======
+const state = {
+  notes: [],
+  layers: [
+    { id: 'layer-1', name: '멜로디', color: '#FF6B6B', muted: false, solo: false },
+    { id: 'layer-2', name: '베이스', color: '#4D96FF', muted: false, solo: false },
+    { id: 'layer-3', name: '리듬', color: '#6BCB77', muted: false, solo: false },
+  ],
+  activeLayerId: 'layer-1',
+  selectedNoteId: null,
+  currentShape: 'circle',
+  currentColor: '#FF6B6B',
+  currentSize: 2,
+  currentOpacity: 0.8,
+  currentMode: 'draw', // draw, select, erase
+  musicKey: 'C',
+  bpm: 120,
+  isPlaying: false,
+  loopEnabled: false,
+  undoStack: [],
+  redoStack: [],
+  noteIdCounter: 0,
+  pitchMap: [], // maps row index to {name, freq}
+};
+
+let renderer;
+let animFrameId;
+
+// ====== Initialization ======
+function init() {
+  const canvas = document.getElementById('main-canvas');
+  renderer = new CanvasRenderer(canvas);
+
+  buildPitchMap();
+  buildPitchLabels();
+  buildBeatLabels();
+  buildColorPalette();
+  updateLayersList();
+  render();
+  bindEvents();
+
+  // Onboarding
+  if (!localStorage.getItem('soundcanvas-seen-onboarding')) {
+    document.getElementById('onboarding').classList.remove('hidden');
+  } else {
+    document.getElementById('onboarding').classList.add('hidden');
+  }
+}
+
+// ====== Pitch Map ======
+function buildPitchMap() {
+  const scale = SCALES[state.musicKey];
+  const pitchMap = [];
+
+  // Build scale notes across octaves (high to low for canvas top-to-bottom)
+  const octaves = [5, 4, 3];
+  for (const octave of octaves) {
+    for (let i = scale.notes.length - 1; i >= 0; i--) {
+      const noteName = scale.notes[i];
+      const fullName = `${noteName}${octave}`;
+      const freq = NOTE_FREQS[fullName];
+      if (freq) {
+        pitchMap.push({ name: fullName, displayName: noteName, freq, octave });
+      }
+    }
+  }
+
+  // Sort high to low
+  pitchMap.sort((a, b) => b.freq - a.freq);
+
+  // Limit to renderer row count
+  state.pitchMap = pitchMap.slice(0, renderer.totalPitchRows);
+
+  // Pad if needed
+  while (state.pitchMap.length < renderer.totalPitchRows) {
+    const last = state.pitchMap[state.pitchMap.length - 1];
+    state.pitchMap.push({ name: '-', displayName: '-', freq: last ? last.freq / 2 : 220, octave: 2 });
+  }
+}
+
+function buildPitchLabels() {
+  const container = document.getElementById('pitch-labels');
+  container.innerHTML = '';
+  for (let i = 0; i < state.pitchMap.length; i++) {
+    const p = state.pitchMap[i];
+    const div = document.createElement('div');
+    div.className = 'pitch-label';
+    div.textContent = p.displayName;
+    if (p.displayName === SCALES[state.musicKey].notes[0]) {
+      div.classList.add('highlight');
+    }
+    div.style.height = renderer.cellHeight + 'px';
+    container.appendChild(div);
+  }
+}
+
+function buildBeatLabels() {
+  const container = document.getElementById('beat-labels');
+  container.innerHTML = '';
+  for (let i = 0; i < renderer.totalBeats; i++) {
+    const div = document.createElement('div');
+    div.className = 'beat-label';
+    if (i % 4 === 0) {
+      div.classList.add('bar-start');
+      div.textContent = `${Math.floor(i / 4) + 1}`;
+    } else {
+      div.textContent = `${(i % 4) + 1}`;
+    }
+    div.style.minWidth = renderer.cellWidth + 'px';
+    div.style.width = renderer.cellWidth + 'px';
+    container.appendChild(div);
+  }
+}
+
+function buildColorPalette() {
+  const container = document.getElementById('color-palette');
+  container.innerHTML = '';
+  const scale = SCALES[state.musicKey];
+
+  scale.notes.forEach((noteName, i) => {
+    const color = NOTE_COLORS[i % NOTE_COLORS.length];
+    const swatch = document.createElement('div');
+    swatch.className = 'color-swatch';
+    if (color === state.currentColor) swatch.classList.add('active');
+    swatch.style.backgroundColor = color;
+    swatch.dataset.color = color;
+    swatch.dataset.note = noteName;
+    swatch.title = `${noteName} 음`;
+
+    const label = document.createElement('span');
+    label.className = 'swatch-label';
+    label.textContent = noteName;
+    swatch.appendChild(label);
+
+    swatch.addEventListener('click', () => {
+      document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+      swatch.classList.add('active');
+      state.currentColor = color;
+    });
+
+    container.appendChild(swatch);
+  });
+}
+
+// ====== Rendering ======
+function render() {
+  renderer.render(state.notes, state.selectedNoteId, state.activeLayerId, state.layers);
+}
+
+// ====== Note Management ======
+function createNote(beatPos, pitchRow) {
+  const pitch = state.pitchMap[pitchRow];
+  if (!pitch || pitch.name === '-') return null;
+
+  const note = {
+    id: `note-${++state.noteIdCounter}`,
+    layerId: state.activeLayerId,
+    beatPos,
+    pitchRow,
+    shape: state.currentShape,
+    color: state.currentColor,
+    sizeFactor: state.currentSize,
+    opacity: state.currentOpacity,
+    pitchName: pitch.name,
+    frequency: pitch.freq,
+  };
+
+  return note;
+}
+
+function addNote(note) {
+  if (!note) return;
+
+  // Check for overlap
+  const overlapping = state.notes.find(n =>
+    n.layerId === note.layerId &&
+    n.pitchRow === note.pitchRow &&
+    n.beatPos < note.beatPos + note.sizeFactor &&
+    note.beatPos < n.beatPos + n.sizeFactor
+  );
+  if (overlapping) return;
+
+  saveUndoState();
+  state.notes.push(note);
+  render();
+
+  // Play preview
+  audioEngine.init().then(() => {
+    audioEngine.playNote({
+      frequency: note.frequency,
+      shape: note.shape,
+      volume: note.opacity * 0.5,
+      duration: (60 / state.bpm) * note.sizeFactor * 0.5,
+    });
+  });
+}
+
+function deleteNote(noteId) {
+  saveUndoState();
+  state.notes = state.notes.filter(n => n.id !== noteId);
+  state.selectedNoteId = null;
+  updateNoteProperties(null);
+  render();
+}
+
+function selectNote(note) {
+  state.selectedNoteId = note ? note.id : null;
+  updateNoteProperties(note);
+  render();
+}
+
+function updateNoteProperties(note) {
+  const emptyPanel = document.getElementById('panel-empty-state');
+  const notePanel = document.getElementById('panel-note-info');
+
+  if (!note) {
+    emptyPanel.style.display = '';
+    notePanel.style.display = 'none';
+    return;
+  }
+
+  emptyPanel.style.display = 'none';
+  notePanel.style.display = '';
+
+  document.getElementById('prop-pitch').textContent = note.pitchName;
+  document.getElementById('prop-instrument').textContent = SHAPE_NAMES[note.shape] || note.shape;
+  document.getElementById('prop-duration').textContent = SIZE_LABELS[note.sizeFactor] || `${note.sizeFactor}박`;
+  document.getElementById('prop-volume').textContent = Math.round(note.opacity * 100) + '%';
+  document.getElementById('prop-beat').textContent = `${Math.floor(note.beatPos / 4) + 1}마디 ${(note.beatPos % 4) + 1}박`;
+}
+
+// ====== Undo/Redo ======
+function saveUndoState() {
+  state.undoStack.push(JSON.stringify(state.notes));
+  if (state.undoStack.length > 50) state.undoStack.shift();
+  state.redoStack = [];
+}
+
+function undo() {
+  if (state.undoStack.length === 0) return;
+  state.redoStack.push(JSON.stringify(state.notes));
+  state.notes = JSON.parse(state.undoStack.pop());
+  state.selectedNoteId = null;
+  updateNoteProperties(null);
+  render();
+}
+
+function redo() {
+  if (state.redoStack.length === 0) return;
+  state.undoStack.push(JSON.stringify(state.notes));
+  state.notes = JSON.parse(state.redoStack.pop());
+  render();
+}
+
+// ====== Layers ======
+function updateLayersList() {
+  const container = document.getElementById('layers-list');
+  container.innerHTML = '';
+
+  for (const layer of state.layers) {
+    const item = document.createElement('div');
+    item.className = 'layer-item' + (layer.id === state.activeLayerId ? ' active' : '');
+    item.innerHTML = `
+      <div class="layer-color" style="background:${layer.color}"></div>
+      <span class="layer-name">${layer.name}</span>
+      <button class="layer-mute ${layer.muted ? 'active' : ''}" data-layer="${layer.id}" title="음소거">M</button>
+      <button class="layer-solo ${layer.solo ? 'active' : ''}" data-layer="${layer.id}" title="솔로">S</button>
+    `;
+
+    item.addEventListener('click', (e) => {
+      if (e.target.classList.contains('layer-mute') || e.target.classList.contains('layer-solo')) return;
+      state.activeLayerId = layer.id;
+      updateLayersList();
+      render();
+    });
+
+    const muteBtn = item.querySelector('.layer-mute');
+    muteBtn.addEventListener('click', () => {
+      layer.muted = !layer.muted;
+      updateLayersList();
+      render();
+    });
+
+    const soloBtn = item.querySelector('.layer-solo');
+    soloBtn.addEventListener('click', () => {
+      layer.solo = !layer.solo;
+      updateLayersList();
+      render();
+    });
+
+    container.appendChild(item);
+  }
+}
+
+function addLayer() {
+  const colors = ['#FF6B6B', '#4D96FF', '#6BCB77', '#FFD93D', '#9B59B6', '#FF8E53', '#E91E9C'];
+  const layerNum = state.layers.length + 1;
+  const layer = {
+    id: `layer-${Date.now()}`,
+    name: `트랙 ${layerNum}`,
+    color: colors[layerNum % colors.length],
+    muted: false,
+    solo: false,
+  };
+  state.layers.push(layer);
+  state.activeLayerId = layer.id;
+  updateLayersList();
+}
+
+// ====== Playback ======
+function togglePlay() {
+  if (state.isPlaying) {
+    stopPlayback();
+  } else {
+    startPlayback();
+  }
+}
+
+async function startPlayback() {
+  await audioEngine.init();
+
+  const bpm = state.bpm;
+  const secondsPerBeat = 60 / bpm;
+  const totalDuration = renderer.totalBeats * secondsPerBeat;
+
+  // Convert notes to audio events
+  const audioNotes = getPlayableNotes(secondsPerBeat);
+
+  if (audioNotes.length === 0) return;
+
+  state.isPlaying = true;
+  audioEngine.loopEnabled = state.loopEnabled;
+
+  const playBtn = document.getElementById('btn-play');
+  playBtn.classList.add('playing');
+
+  const playhead = document.getElementById('playhead');
+  playhead.style.display = 'block';
+
+  audioEngine.onPlayheadUpdate = (progress) => {
+    const px = renderer.progressToPixel(progress);
+    playhead.style.left = px + 'px';
+
+    // Auto-scroll
+    const wrapper = document.getElementById('canvas-scroll-wrapper');
+    const scrollLeft = wrapper.scrollLeft;
+    const wrapperWidth = wrapper.clientWidth;
+    if (px > scrollLeft + wrapperWidth - 50 || px < scrollLeft) {
+      wrapper.scrollLeft = px - 50;
+    }
+  };
+
+  audioEngine.onPlaybackEnd = () => {
+    stopPlayback();
+  };
+
+  audioEngine.play(audioNotes, totalDuration);
+}
+
+function stopPlayback() {
+  state.isPlaying = false;
+  audioEngine.stop();
+
+  const playBtn = document.getElementById('btn-play');
+  playBtn.classList.remove('playing');
+
+  const playhead = document.getElementById('playhead');
+  playhead.style.display = 'none';
+}
+
+function getPlayableNotes(secondsPerBeat) {
+  const mutedLayers = new Set();
+  const soloLayers = new Set();
+  for (const layer of state.layers) {
+    if (layer.muted) mutedLayers.add(layer.id);
+    if (layer.solo) soloLayers.add(layer.id);
+  }
+  const hasSolo = soloLayers.size > 0;
+
+  return state.notes
+    .filter(n => hasSolo ? soloLayers.has(n.layerId) : !mutedLayers.has(n.layerId))
+    .map(n => ({
+      time: n.beatPos * secondsPerBeat,
+      frequency: n.frequency,
+      shape: n.shape,
+      volume: n.opacity,
+      duration: n.sizeFactor * secondsPerBeat,
+    }));
+}
+
+// ====== Presets (including Botanica) ======
+const PRESETS = {
+  heartbeat: {
+    name: '심장박동',
+    generate(scale) {
+      const notes = [];
+      const root = scale.notes[0];
+      // Steady pulse rhythm
+      for (let bar = 0; bar < 8; bar++) {
+        const beat = bar * 4;
+        notes.push({ beatPos: beat, pitchIdx: 0, shape: 'hexagon', size: 1, opacity: 0.9, color: '#FF6B6B' });
+        notes.push({ beatPos: beat + 1, pitchIdx: 0, shape: 'hexagon', size: 1, opacity: 0.5, color: '#FF8E53' });
+        notes.push({ beatPos: beat + 2, pitchIdx: 0, shape: 'hexagon', size: 1, opacity: 0.7, color: '#FF6B6B' });
+        notes.push({ beatPos: beat + 3, pitchIdx: 2, shape: 'circle', size: 1, opacity: 0.3, color: '#FFD93D' });
+      }
+      return notes;
+    }
+  },
+  rain: {
+    name: '빗방울',
+    generate(scale) {
+      const notes = [];
+      // Random high pitched droplets
+      for (let i = 0; i < 32; i++) {
+        const beat = i;
+        if (Math.random() > 0.5) {
+          const pitchIdx = Math.floor(Math.random() * 5);
+          notes.push({
+            beatPos: beat,
+            pitchIdx,
+            shape: 'star',
+            size: 1,
+            opacity: 0.2 + Math.random() * 0.4,
+            color: '#4D96FF'
+          });
+        }
+      }
+      // Sustained ambient pad
+      for (let bar = 0; bar < 4; bar++) {
+        notes.push({
+          beatPos: bar * 8,
+          pitchIdx: 12 + Math.floor(Math.random() * 4),
+          shape: 'circle',
+          size: 8,
+          opacity: 0.25,
+          color: '#9B59B6'
+        });
+      }
+      return notes;
+    }
+  },
+  sunrise: {
+    name: '일출',
+    generate(scale) {
+      const notes = [];
+      // Gradual ascending melody
+      for (let i = 0; i < 16; i++) {
+        const pitchIdx = Math.max(0, 16 - i);
+        notes.push({
+          beatPos: i * 2,
+          pitchIdx,
+          shape: 'circle',
+          size: 2,
+          opacity: 0.3 + (i / 16) * 0.6,
+          color: NOTE_COLORS[i % 7],
+        });
+      }
+      // Bass foundation
+      for (let bar = 0; bar < 8; bar++) {
+        notes.push({
+          beatPos: bar * 4,
+          pitchIdx: 18,
+          shape: 'triangle',
+          size: 4,
+          opacity: 0.4,
+          color: '#FF8E53'
+        });
+      }
+      return notes;
+    }
+  },
+  waves: {
+    name: '파도',
+    generate(scale) {
+      const notes = [];
+      // Sine-wave like melodic contour
+      for (let i = 0; i < 32; i++) {
+        const sine = Math.sin(i * Math.PI / 8);
+        const pitchIdx = Math.round(8 + sine * 6);
+        notes.push({
+          beatPos: i,
+          pitchIdx: Math.max(0, Math.min(23, pitchIdx)),
+          shape: 'circle',
+          size: 2,
+          opacity: 0.4 + Math.abs(sine) * 0.4,
+          color: sine > 0 ? '#4D96FF' : '#6BCB77',
+        });
+      }
+      return notes;
+    }
+  },
+  city: {
+    name: '도시',
+    generate(scale) {
+      const notes = [];
+      // Rhythmic electronic pattern
+      for (let bar = 0; bar < 8; bar++) {
+        const beat = bar * 4;
+        // Kick
+        notes.push({ beatPos: beat, pitchIdx: 22, shape: 'hexagon', size: 1, opacity: 0.9, color: '#FF6B6B' });
+        notes.push({ beatPos: beat + 2, pitchIdx: 22, shape: 'hexagon', size: 1, opacity: 0.8, color: '#FF6B6B' });
+        // Hi-hat
+        notes.push({ beatPos: beat + 1, pitchIdx: 2, shape: 'hexagon', size: 1, opacity: 0.4, color: '#FFD93D' });
+        notes.push({ beatPos: beat + 3, pitchIdx: 2, shape: 'hexagon', size: 1, opacity: 0.4, color: '#FFD93D' });
+        // Synth stab
+        if (bar % 2 === 0) {
+          notes.push({ beatPos: beat + 1, pitchIdx: 8, shape: 'square', size: 1, opacity: 0.6, color: '#9B59B6' });
+        }
+        // Bass
+        notes.push({ beatPos: beat, pitchIdx: 18, shape: 'diamond', size: 2, opacity: 0.7, color: '#4D96FF' });
+      }
+      return notes;
+    }
+  },
+  stars: {
+    name: '별빛',
+    generate(scale) {
+      const notes = [];
+      // Arpeggiated bell pattern (Botanica-inspired - organic, nature-like)
+      const scaleLen = scale.notes.length;
+      for (let bar = 0; bar < 8; bar++) {
+        for (let i = 0; i < 4; i++) {
+          const beat = bar * 4 + i;
+          // Ascending arpeggio
+          const pitchIdx = 4 + (i % scaleLen) * 2;
+          notes.push({
+            beatPos: beat,
+            pitchIdx: Math.min(23, pitchIdx),
+            shape: 'star',
+            size: 1,
+            opacity: 0.3 + (i % 3) * 0.2,
+            color: NOTE_COLORS[(bar + i) % 7],
+          });
+        }
+        // Pad
+        if (bar % 2 === 0) {
+          notes.push({
+            beatPos: bar * 4,
+            pitchIdx: 14,
+            shape: 'circle',
+            size: 8,
+            opacity: 0.2,
+            color: '#6BCB77'
+          });
+        }
+      }
+      return notes;
+    }
+  },
+  // Botanica genre preset - nature-inspired ambient organic music
+  botanica: {
+    name: '보타니카',
+    generate(scale) {
+      const notes = [];
+      const scaleLen = scale.notes.length;
+
+      // Organic pad layer - slowly evolving chords like growing plants
+      for (let bar = 0; bar < 4; bar++) {
+        // Root pad (earth)
+        notes.push({
+          beatPos: bar * 8,
+          pitchIdx: 16,
+          shape: 'circle',
+          size: 8,
+          opacity: 0.25,
+          color: '#6BCB77', // green - earth
+          layer: 'layer-1'
+        });
+        // Third pad (leaves)
+        notes.push({
+          beatPos: bar * 8,
+          pitchIdx: 14,
+          shape: 'circle',
+          size: 8,
+          opacity: 0.2,
+          color: '#4D96FF', // blue - water
+          layer: 'layer-1'
+        });
+        // Fifth pad (sky)
+        notes.push({
+          beatPos: bar * 8 + 2,
+          pitchIdx: 12,
+          shape: 'circle',
+          size: 4,
+          opacity: 0.18,
+          color: '#9B59B6', // purple - flowers
+          layer: 'layer-1'
+        });
+      }
+
+      // Delicate melodic fragments - like birdsong or wind chimes
+      const melodyPattern = [0, 2, 4, 2, 3, 1, 4, 3, 0, 1, 3, 4, 2, 0, 3, 1];
+      for (let i = 0; i < melodyPattern.length; i++) {
+        const pitchIdx = 4 + melodyPattern[i] * 2;
+        const beat = i * 2;
+        if (beat >= 32) break;
+        if (Math.random() > 0.15) { // slight organic randomness
+          notes.push({
+            beatPos: beat,
+            pitchIdx: Math.min(23, pitchIdx),
+            shape: i % 3 === 0 ? 'star' : 'triangle',
+            size: i % 4 === 0 ? 4 : 2,
+            opacity: 0.3 + Math.sin(i * 0.5) * 0.15,
+            color: NOTE_COLORS[melodyPattern[i] % 7],
+            layer: 'layer-1'
+          });
+        }
+      }
+
+      // Gentle rhythmic texture - like raindrops on leaves
+      for (let i = 0; i < 32; i++) {
+        if (i % 3 === 0 || i % 5 === 0) {
+          notes.push({
+            beatPos: i,
+            pitchIdx: 2 + Math.floor(Math.sin(i * 0.7) * 2 + 2),
+            shape: 'star',
+            size: 1,
+            opacity: 0.15 + Math.random() * 0.2,
+            color: '#FFD93D',
+            layer: 'layer-3'
+          });
+        }
+      }
+
+      // Sub-bass foundation - deep earth vibration
+      for (let bar = 0; bar < 8; bar++) {
+        if (bar % 2 === 0) {
+          notes.push({
+            beatPos: bar * 4,
+            pitchIdx: 20,
+            shape: 'circle',
+            size: 8,
+            opacity: 0.35,
+            color: '#6BCB77',
+            layer: 'layer-2'
+          });
+        }
+      }
+
+      return notes;
+    }
+  }
+};
+
+function applyPreset(presetName) {
+  const preset = PRESETS[presetName];
+  if (!preset) return;
+
+  saveUndoState();
+
+  const scale = SCALES[state.musicKey];
+  const generatedNotes = preset.generate(scale);
+
+  for (const gn of generatedNotes) {
+    const layerId = gn.layer || state.activeLayerId;
+    const pitch = state.pitchMap[gn.pitchIdx];
+    if (!pitch || pitch.name === '-') continue;
+
+    // Check overlap
+    const overlapping = state.notes.find(n =>
+      n.layerId === layerId &&
+      n.pitchRow === gn.pitchIdx &&
+      n.beatPos < gn.beatPos + gn.size &&
+      gn.beatPos < n.beatPos + n.sizeFactor
+    );
+    if (overlapping) continue;
+
+    state.notes.push({
+      id: `note-${++state.noteIdCounter}`,
+      layerId,
+      beatPos: gn.beatPos,
+      pitchRow: gn.pitchIdx,
+      shape: gn.shape,
+      color: gn.color,
+      sizeFactor: gn.size,
+      opacity: gn.opacity,
+      pitchName: pitch.name,
+      frequency: pitch.freq,
+    });
+  }
+
+  render();
+}
+
+// ====== Export ======
+async function exportWav() {
+  const modal = document.getElementById('export-modal');
+  const progress = document.getElementById('export-progress');
+  const options = document.querySelector('.export-options');
+  const fill = document.getElementById('progress-fill');
+  const status = document.getElementById('export-status');
+
+  options.style.display = 'none';
+  progress.style.display = 'block';
+  status.textContent = 'WAV 파일 생성 중...';
+
+  await audioEngine.init();
+
+  const secondsPerBeat = 60 / state.bpm;
+  const totalDuration = renderer.totalBeats * secondsPerBeat;
+  const audioNotes = getPlayableNotes(secondsPerBeat);
+
+  try {
+    const blob = await audioEngine.exportWav(audioNotes, totalDuration, (p) => {
+      fill.style.width = (p * 100) + '%';
+    });
+
+    status.textContent = '다운로드 준비 완료!';
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `soundcanvas-${Date.now()}.wav`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    setTimeout(() => {
+      modal.style.display = 'none';
+      options.style.display = '';
+      progress.style.display = 'none';
+      fill.style.width = '0';
+    }, 1500);
+  } catch (e) {
+    status.textContent = '오류가 발생했습니다: ' + e.message;
+    console.error(e);
+  }
+}
+
+function exportMidi() {
+  const secondsPerBeat = 60 / state.bpm;
+  const audioNotes = getPlayableNotes(secondsPerBeat);
+
+  const blob = midiExporter.export(audioNotes, state.bpm);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `soundcanvas-${Date.now()}.mid`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  document.getElementById('export-modal').style.display = 'none';
+}
+
+function exportProject() {
+  const project = {
+    version: 1,
+    notes: state.notes,
+    layers: state.layers,
+    bpm: state.bpm,
+    musicKey: state.musicKey,
+    timestamp: new Date().toISOString(),
+  };
+
+  const blob = new Blob([JSON.stringify(project, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `soundcanvas-project-${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  document.getElementById('export-modal').style.display = 'none';
+}
+
+function importProject(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const project = JSON.parse(e.target.result);
+      if (project.version && project.notes) {
+        saveUndoState();
+        state.notes = project.notes;
+        state.layers = project.layers || state.layers;
+        state.bpm = project.bpm || 120;
+        state.musicKey = project.musicKey || 'C';
+        state.noteIdCounter = Math.max(...state.notes.map(n => parseInt(n.id.split('-')[1]) || 0), state.noteIdCounter);
+
+        document.getElementById('tempo').value = state.bpm;
+        document.getElementById('music-key').value = state.musicKey;
+
+        buildPitchMap();
+        buildPitchLabels();
+        buildColorPalette();
+        updateLayersList();
+        render();
+      }
+    } catch (err) {
+      console.error('Invalid project file:', err);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// ====== Event Binding ======
+function bindEvents() {
+  const canvas = document.getElementById('main-canvas');
+
+  // Canvas interaction
+  let isDragging = false;
+  let dragStartNote = null;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    handleCanvasInteraction(e);
+    isDragging = true;
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    if (state.currentMode === 'draw') {
+      handleCanvasInteraction(e);
+    }
+  });
+
+  canvas.addEventListener('pointerup', () => {
+    isDragging = false;
+    dragStartNote = null;
+  });
+
+  canvas.addEventListener('pointerleave', () => {
+    isDragging = false;
+  });
+
+  // Shape buttons
+  document.querySelectorAll('.tool-btn[data-shape]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tool-btn[data-shape]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.currentShape = btn.dataset.shape;
+    });
+  });
+
+  // Size buttons
+  document.querySelectorAll('.size-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.currentSize = parseInt(btn.dataset.size);
+    });
+  });
+
+  // Mode buttons
+  document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.currentMode = btn.dataset.mode;
+      const canvas = document.getElementById('main-canvas');
+      canvas.className = '';
+      canvas.classList.add(`mode-${state.currentMode}`);
+    });
+  });
+
+  // Opacity slider
+  const opacitySlider = document.getElementById('opacity-slider');
+  opacitySlider.addEventListener('input', () => {
+    state.currentOpacity = opacitySlider.value / 100;
+    document.getElementById('volume-display').textContent = opacitySlider.value + '%';
+  });
+
+  // Custom color
+  document.getElementById('custom-color').addEventListener('input', (e) => {
+    state.currentColor = e.target.value;
+    document.querySelectorAll('.color-swatch').forEach(s => s.classList.remove('active'));
+  });
+
+  // Transport
+  document.getElementById('btn-play').addEventListener('click', togglePlay);
+  document.getElementById('btn-rewind').addEventListener('click', () => {
+    stopPlayback();
+    const wrapper = document.getElementById('canvas-scroll-wrapper');
+    wrapper.scrollLeft = 0;
+  });
+  document.getElementById('btn-loop').addEventListener('click', (e) => {
+    state.loopEnabled = !state.loopEnabled;
+    e.currentTarget.classList.toggle('active', state.loopEnabled);
+  });
+
+  // Tempo
+  document.getElementById('tempo').addEventListener('change', (e) => {
+    state.bpm = Math.max(40, Math.min(240, parseInt(e.target.value) || 120));
+    e.target.value = state.bpm;
+  });
+
+  // Key change
+  document.getElementById('music-key').addEventListener('change', (e) => {
+    state.musicKey = e.target.value;
+    buildPitchMap();
+    buildPitchLabels();
+    buildColorPalette();
+    // Update existing note frequencies
+    for (const note of state.notes) {
+      const pitch = state.pitchMap[note.pitchRow];
+      if (pitch) {
+        note.pitchName = pitch.name;
+        note.frequency = pitch.freq;
+      }
+    }
+    render();
+  });
+
+  // Undo/Redo
+  document.getElementById('btn-undo').addEventListener('click', undo);
+  document.getElementById('btn-redo').addEventListener('click', redo);
+
+  // Clear
+  document.getElementById('btn-clear').addEventListener('click', () => {
+    if (state.notes.length === 0) return;
+    if (confirm('모든 노트를 지우시겠습니까?')) {
+      saveUndoState();
+      state.notes = [];
+      state.selectedNoteId = null;
+      updateNoteProperties(null);
+      render();
+    }
+  });
+
+  // Delete selected note
+  document.getElementById('btn-delete-note').addEventListener('click', () => {
+    if (state.selectedNoteId) {
+      deleteNote(state.selectedNoteId);
+    }
+  });
+
+  // Add layer
+  document.getElementById('btn-add-layer').addEventListener('click', addLayer);
+
+  // Export
+  document.getElementById('btn-export').addEventListener('click', () => {
+    document.getElementById('export-modal').style.display = '';
+    document.querySelector('.export-options').style.display = '';
+    document.getElementById('export-progress').style.display = 'none';
+  });
+  document.getElementById('modal-close').addEventListener('click', () => {
+    document.getElementById('export-modal').style.display = 'none';
+  });
+  document.getElementById('export-wav').addEventListener('click', exportWav);
+  document.getElementById('export-midi').addEventListener('click', exportMidi);
+  document.getElementById('export-json').addEventListener('click', exportProject);
+
+  // Presets
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      applyPreset(btn.dataset.preset);
+    });
+  });
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+    if (e.key === ' ') {
+      e.preventDefault();
+      togglePlay();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+      e.preventDefault();
+      redo();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (state.selectedNoteId) {
+        e.preventDefault();
+        deleteNote(state.selectedNoteId);
+      }
+    } else if (e.key === '1') {
+      setMode('draw');
+    } else if (e.key === '2') {
+      setMode('select');
+    } else if (e.key === '3') {
+      setMode('erase');
+    }
+  });
+
+  // Drag and drop import
+  document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    document.getElementById('import-overlay').style.display = '';
+  });
+  document.addEventListener('dragleave', (e) => {
+    if (e.relatedTarget === null) {
+      document.getElementById('import-overlay').style.display = 'none';
+    }
+  });
+  document.addEventListener('drop', (e) => {
+    e.preventDefault();
+    document.getElementById('import-overlay').style.display = 'none';
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith('.json')) {
+      importProject(file);
+    }
+  });
+
+  // Onboarding
+  document.getElementById('onboarding-close').addEventListener('click', () => {
+    document.getElementById('onboarding').classList.add('hidden');
+    localStorage.setItem('soundcanvas-seen-onboarding', '1');
+  });
+
+  // Mobile toolbar
+  document.getElementById('mobile-play')?.addEventListener('click', togglePlay);
+  document.getElementById('mobile-export')?.addEventListener('click', () => {
+    document.getElementById('export-modal').style.display = '';
+  });
+
+  document.querySelectorAll('.mobile-tool[data-mobile-panel]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Toggle mobile panels (simplified for mobile)
+      document.querySelectorAll('.mobile-tool').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    });
+  });
+
+  // Window resize
+  window.addEventListener('resize', () => {
+    setTimeout(() => {
+      buildPitchLabels();
+      buildBeatLabels();
+      render();
+    }, 100);
+  });
+}
+
+function setMode(mode) {
+  state.currentMode = mode;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+  const canvas = document.getElementById('main-canvas');
+  canvas.className = `mode-${mode}`;
+}
+
+function handleCanvasInteraction(e) {
+  const canvas = document.getElementById('main-canvas');
+  const { beatPos, pitchRow } = renderer.canvasToGrid(e.clientX, e.clientY);
+
+  switch (state.currentMode) {
+    case 'draw': {
+      const existingNote = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
+      if (existingNote) {
+        selectNote(existingNote);
+        return;
+      }
+      const note = createNote(beatPos, pitchRow);
+      addNote(note);
+      break;
+    }
+    case 'select': {
+      const note = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
+      selectNote(note);
+      break;
+    }
+    case 'erase': {
+      const note = renderer.findNoteAt(state.notes, e.clientX, e.clientY);
+      if (note) deleteNote(note.id);
+      break;
+    }
+  }
+}
+
+// ====== Start ======
+document.addEventListener('DOMContentLoaded', init);
