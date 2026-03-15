@@ -86,6 +86,10 @@ const state = {
 
 let renderer;
 let animFrameId;
+let isMobile = window.innerWidth <= 640;
+let seqCurrentBar = 0; // which 4-beat bar is shown in step sequencer
+const SEQ_BEATS_PER_BAR = 4;
+const SEQ_TOTAL_BARS = 8;
 
 // init is defined at the bottom of the file
 
@@ -190,7 +194,181 @@ function buildColorPalette() {
 
 // ====== Rendering ======
 function render() {
-  renderer.render(state.notes, state.selectedNoteId, state.activeLayerId, state.layers);
+  if (renderer) {
+    renderer.render(state.notes, state.selectedNoteId, state.activeLayerId, state.layers);
+  }
+  if (isMobile) {
+    renderStepSequencer();
+  }
+}
+
+// ====== Step Sequencer (Mobile) ======
+function buildStepSequencer() {
+  const container = document.getElementById('step-sequencer');
+  if (!container) return;
+
+  const scale = SCALES[state.musicKey];
+  // Use 1 octave of the scale (enough for mobile, not overwhelming)
+  const octave = 4;
+  const pitchRows = [];
+  for (let i = scale.notes.length - 1; i >= 0; i--) {
+    const noteName = scale.notes[i];
+    const fullName = `${noteName}${octave}`;
+    const freq = NOTE_FREQS[fullName];
+    if (freq) {
+      pitchRows.push({ name: fullName, displayName: noteName, freq, octave, scaleIndex: i });
+    }
+  }
+  // Add one octave up root for range
+  const rootUp = `${scale.notes[0]}${octave + 1}`;
+  if (NOTE_FREQS[rootUp]) {
+    pitchRows.unshift({ name: rootUp, displayName: scale.notes[0], freq: NOTE_FREQS[rootUp], octave: octave + 1, scaleIndex: 0 });
+  }
+
+  container._pitchRows = pitchRows;
+
+  // Bar tabs
+  let html = '<div class="seq-bar-tabs">';
+  for (let b = 0; b < SEQ_TOTAL_BARS; b++) {
+    html += `<button class="seq-bar-tab${b === seqCurrentBar ? ' active' : ''}" data-bar="${b}">마디 ${b + 1}</button>`;
+  }
+  html += '</div>';
+
+  // Grid container
+  html += '<div class="seq-grid-container">';
+
+  // Pitch labels
+  html += '<div class="seq-pitch-labels">';
+  for (const p of pitchRows) {
+    const isRoot = p.displayName === scale.notes[0];
+    html += `<div class="seq-pitch-label${isRoot ? ' root' : ''}">${p.displayName}${p.octave}</div>`;
+  }
+  html += '</div>';
+
+  // Grid
+  html += '<div class="seq-grid">';
+  for (let r = 0; r < pitchRows.length; r++) {
+    html += '<div class="seq-row">';
+    for (let c = 0; c < SEQ_BEATS_PER_BAR; c++) {
+      const beatPos = seqCurrentBar * SEQ_BEATS_PER_BAR + c;
+      html += `<button class="seq-cell" data-row="${r}" data-col="${c}" data-beat="${beatPos}">`;
+      html += `<div class="seq-dot"></div>`;
+      html += `</button>`;
+    }
+    html += '</div>';
+  }
+  html += '</div></div>';
+
+  // Beat numbers
+  html += '<div class="seq-playhead-row">';
+  for (let c = 0; c < SEQ_BEATS_PER_BAR; c++) {
+    const beatNum = c + 1;
+    html += `<div class="seq-beat-num${c === 0 ? ' beat-one' : ''}">${beatNum}</div>`;
+  }
+  html += '</div>';
+
+  container.innerHTML = html;
+
+  // Bind events
+  container.querySelectorAll('.seq-bar-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      seqCurrentBar = parseInt(tab.dataset.bar);
+      buildStepSequencer();
+      renderStepSequencer();
+    });
+  });
+
+  container.querySelectorAll('.seq-cell').forEach(cell => {
+    cell.addEventListener('click', (e) => {
+      e.preventDefault();
+      const row = parseInt(cell.dataset.row);
+      const beatPos = parseInt(cell.dataset.beat);
+      const pitch = pitchRows[row];
+      if (!pitch) return;
+
+      // Check if note exists at this position
+      const existing = state.notes.find(n =>
+        n.pitchRow === getPitchRowForSeq(pitch) &&
+        n.beatPos <= beatPos &&
+        beatPos < n.beatPos + n.sizeFactor
+      );
+
+      if (existing) {
+        // Remove note (toggle off)
+        saveUndoState();
+        state.notes = state.notes.filter(n => n.id !== existing.id);
+        render();
+      } else {
+        // Add note
+        const note = {
+          id: `note-${++state.noteIdCounter}`,
+          layerId: state.activeLayerId,
+          beatPos,
+          pitchRow: getPitchRowForSeq(pitch),
+          shape: state.currentShape,
+          color: NOTE_COLORS[pitch.scaleIndex % NOTE_COLORS.length],
+          sizeFactor: state.currentSize,
+          opacity: state.currentOpacity,
+          pitchName: pitch.name,
+          frequency: pitch.freq,
+        };
+        saveUndoState();
+        state.notes.push(note);
+        render();
+
+        // Play preview sound
+        audioEngine.init().then(() => {
+          audioEngine.playNote({
+            frequency: note.frequency,
+            shape: note.shape,
+            duration: 0.2,
+            velocity: note.opacity,
+          });
+        });
+      }
+    });
+  });
+
+  renderStepSequencer();
+}
+
+// Map a step sequencer pitch to the full pitchMap row index
+function getPitchRowForSeq(seqPitch) {
+  const idx = state.pitchMap.findIndex(p => p.name === seqPitch.name);
+  return idx >= 0 ? idx : 0;
+}
+
+function renderStepSequencer() {
+  const container = document.getElementById('step-sequencer');
+  if (!container || !container._pitchRows) return;
+  const pitchRows = container._pitchRows;
+
+  container.querySelectorAll('.seq-cell').forEach(cell => {
+    const row = parseInt(cell.dataset.row);
+    const beatPos = parseInt(cell.dataset.beat);
+    const pitch = pitchRows[row];
+    if (!pitch) return;
+
+    const pitchRowIdx = getPitchRowForSeq(pitch);
+
+    // Find note at this cell
+    const note = state.notes.find(n =>
+      n.pitchRow === pitchRowIdx &&
+      n.beatPos <= beatPos &&
+      beatPos < n.beatPos + n.sizeFactor
+    );
+
+    const dot = cell.querySelector('.seq-dot');
+    if (note) {
+      cell.classList.add('active');
+      dot.style.display = 'block';
+      dot.style.background = note.color;
+      dot.style.opacity = note.opacity;
+    } else {
+      cell.classList.remove('active');
+      dot.style.display = 'none';
+    }
+  });
 }
 
 // ====== Note Management ======
@@ -1180,31 +1358,16 @@ function bindEvents() {
 
       content.innerHTML = '';
 
-      if (panel === 'tools') {
+      if (panel === 'instrument') {
         content.innerHTML = `
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">음색 (Timbre)</h3>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px">
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">악기 (Timbre)</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
             ${['circle','square','triangle','diamond','star','hexagon'].map(s => {
-              const names = {circle:'Sine 부드러운',square:'Square 전자',triangle:'Triangle 맑은',diamond:'Saw 날카로운',star:'Bell 벨',hexagon:'Perc 타악기'};
-              return `<button class="tool-btn mobile-shape-btn ${state.currentShape===s?'active':''}" data-shape="${s}" style="padding:14px 6px;min-height:48px">
-                <span style="font-size:12px;font-weight:600">${names[s]}</span>
+              const names = {circle:'Sine\n부드러운',square:'Square\n전자',triangle:'Triangle\n맑은',diamond:'Saw\n날카로운',star:'Bell\n벨',hexagon:'Perc\n타악기'};
+              return `<button class="tool-btn mobile-shape-btn ${state.currentShape===s?'active':''}" data-shape="${s}" style="padding:14px 6px;min-height:56px">
+                <span style="font-size:13px;font-weight:600;white-space:pre-line;line-height:1.3">${names[s]}</span>
               </button>`;
             }).join('')}
-          </div>
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">음가 (Duration)</h3>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px">
-            ${[{s:1,l:'16분'},{s:2,l:'8분'},{s:4,l:'4분'},{s:8,l:'2분'}].map(({s,l}) =>
-              `<button class="size-btn mobile-size-btn ${state.currentSize===s?'active':''}" data-size="${s}" style="padding:12px 4px;min-height:48px">
-                <div class="size-preview" style="width:${8+s*4}px;height:${8+s*4}px;background:currentColor;border-radius:50%;opacity:0.5"></div>
-                <span style="font-weight:600">${l}</span>
-              </button>`
-            ).join('')}
-          </div>
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">도구</h3>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-            <button class="mode-btn mobile-mode-btn ${state.currentMode==='draw'?'active':''}" data-mode="draw" style="padding:12px;min-height:44px;font-weight:600">그리기</button>
-            <button class="mode-btn mobile-mode-btn ${state.currentMode==='select'?'active':''}" data-mode="select" style="padding:12px;min-height:44px;font-weight:600">선택</button>
-            <button class="mode-btn mobile-mode-btn ${state.currentMode==='erase'?'active':''}" data-mode="erase" style="padding:12px;min-height:44px;font-weight:600">지우개</button>
           </div>
         `;
         content.querySelectorAll('.mobile-shape-btn').forEach(b => {
@@ -1215,6 +1378,22 @@ function bindEvents() {
             updateMobileToolIndicator();
           });
         });
+      } else if (panel === 'duration') {
+        content.innerHTML = `
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">음표 길이 (Duration)</h3>
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px">셀 하나가 1비트. 길이를 늘리면 여러 셀을 차지합니다.</p>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:18px">
+            ${[{s:1,l:'16분음표',d:'½비트'},{s:2,l:'8분음표',d:'1비트'},{s:4,l:'4분음표',d:'2비트'},{s:8,l:'2분음표',d:'4비트'}].map(({s,l,d}) =>
+              `<button class="size-btn mobile-size-btn ${state.currentSize===s?'active':''}" data-size="${s}" style="padding:14px 4px;min-height:56px;flex-direction:column;display:flex;align-items:center;gap:4px">
+                <span style="font-weight:700;font-size:13px">${d}</span>
+                <span style="font-size:10px;color:var(--text-muted)">${l}</span>
+              </button>`
+            ).join('')}
+          </div>
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">셈여림 (Dynamics)</h3>
+          <input type="range" class="styled-range" id="mobile-opacity" min="10" max="100" value="${Math.round(state.currentOpacity*100)}" style="width:100%;margin:10px 0;height:6px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>pp 여리게</span><span id="mobile-vol-label">${Math.round(state.currentOpacity*100)}%</span><span>ff 세게</span></div>
+        `;
         content.querySelectorAll('.mobile-size-btn').forEach(b => {
           b.addEventListener('click', () => {
             content.querySelectorAll('.mobile-size-btn').forEach(x=>x.classList.remove('active'));
@@ -1223,47 +1402,18 @@ function bindEvents() {
             updateMobileToolIndicator();
           });
         });
-        content.querySelectorAll('.mobile-mode-btn').forEach(b => {
-          b.addEventListener('click', () => {
-            content.querySelectorAll('.mobile-mode-btn').forEach(x=>x.classList.remove('active'));
-            b.classList.add('active');
-            setMode(b.dataset.mode);
-          });
-        });
-      } else if (panel === 'colors') {
-        const scale = SCALES[state.musicKey];
-        content.innerHTML = `
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">음정 (Pitch) - 색상으로 선택</h3>
-          <div style="display:grid;grid-template-columns:repeat(${Math.min(scale.notes.length, 5)},1fr);gap:10px;margin-bottom:18px">
-            ${scale.notes.map((n, i) => {
-              const c = NOTE_COLORS[i % NOTE_COLORS.length];
-              return `<div class="mobile-color-btn" data-color="${c}" style="background:${c};aspect-ratio:1;border-radius:12px;cursor:pointer;min-height:50px;border:3px solid ${state.currentColor===c?'var(--text-primary)':'transparent'};box-shadow:0 2px 6px rgba(0,0,0,0.1);display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px">
-                <span style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.9);text-shadow:0 1px 2px rgba(0,0,0,0.4)">${n}</span>
-              </div>`;
-            }).join('')}
-          </div>
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">셈여림 (Dynamics)</h3>
-          <input type="range" class="styled-range" id="mobile-opacity" min="10" max="100" value="${Math.round(state.currentOpacity*100)}" style="width:100%;margin:10px 0;height:6px">
-          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>pp 여리게</span><span>${Math.round(state.currentOpacity*100)}%</span><span>ff 세게</span></div>
-        `;
-        content.querySelectorAll('.mobile-color-btn').forEach(b => {
-          b.addEventListener('click', () => {
-            content.querySelectorAll('.mobile-color-btn').forEach(x => x.style.borderColor = 'transparent');
-            b.style.borderColor = 'var(--text-primary)';
-            state.currentColor = b.dataset.color;
-            updateMobileToolIndicator();
-          });
-        });
         const mobileOpacity = content.querySelector('#mobile-opacity');
         if (mobileOpacity) {
           mobileOpacity.addEventListener('input', () => {
             state.currentOpacity = mobileOpacity.value / 100;
+            const lbl = content.querySelector('#mobile-vol-label');
+            if (lbl) lbl.textContent = mobileOpacity.value + '%';
           });
         }
-      } else if (panel === 'props') {
+      } else if (panel === 'settings') {
         content.innerHTML = `
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">조성 (Key)</h3>
-          <select id="mobile-key" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border-color);font-size:14px;margin-bottom:18px;background:var(--bg-surface);font-weight:500">
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">조성 (Key)</h3>
+          <select id="mobile-key" style="width:100%;padding:14px;border-radius:10px;border:1px solid var(--border-color);font-size:15px;margin-bottom:18px;background:var(--bg-surface);font-weight:500">
             <option value="C" ${state.musicKey==='C'?'selected':''}>C Major - 밝은</option>
             <option value="G" ${state.musicKey==='G'?'selected':''}>G Major - 따뜻한</option>
             <option value="D" ${state.musicKey==='D'?'selected':''}>D Major - 힘찬</option>
@@ -1273,12 +1423,12 @@ function bindEvents() {
             <option value="Dm" ${state.musicKey==='Dm'?'selected':''}>D minor - 감성적</option>
             <option value="pentatonic" ${state.musicKey==='pentatonic'?'selected':''}>Pentatonic - 동양적</option>
           </select>
-          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">BPM (속도)</h3>
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">BPM (속도)</h3>
           <input type="range" class="styled-range" id="mobile-tempo" min="40" max="240" value="${state.bpm}" style="width:100%;margin:10px 0;height:6px">
           <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>Largo</span><span id="mobile-tempo-label">${state.bpm} BPM</span><span>Presto</span></div>
-          <div style="margin-top:18px;display:flex;gap:8px">
-            <button id="mobile-undo" style="flex:1;padding:12px;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-surface);font-size:13px;cursor:pointer;font-weight:600;min-height:44px">되돌리기</button>
-            <button id="mobile-clear" style="flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,59,92,0.3);background:rgba(255,59,92,0.08);color:var(--accent);font-size:13px;cursor:pointer;font-weight:600;min-height:44px">전체 지우기</button>
+          <div style="margin-top:20px;display:flex;gap:8px">
+            <button id="mobile-undo" style="flex:1;padding:14px;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-surface);font-size:14px;cursor:pointer;font-weight:600;min-height:48px">되돌리기</button>
+            <button id="mobile-clear" style="flex:1;padding:14px;border-radius:10px;border:1px solid rgba(255,59,92,0.3);background:rgba(255,59,92,0.08);color:var(--accent);font-size:14px;cursor:pointer;font-weight:600;min-height:48px">전체 지우기</button>
           </div>
         `;
         const mobileKey = content.querySelector('#mobile-key');
@@ -1286,13 +1436,9 @@ function bindEvents() {
           state.musicKey = mobileKey.value;
           document.getElementById('music-key').value = mobileKey.value;
           buildPitchMap();
-          buildPitchLabels();
           buildColorPalette();
-          for (const note of state.notes) {
-            const pitch = state.pitchMap[note.pitchRow];
-            if (pitch) { note.pitchName = pitch.name; note.frequency = pitch.freq; }
-          }
           render();
+          buildStepSequencer();
         });
         const mobileTempo = content.querySelector('#mobile-tempo');
         mobileTempo?.addEventListener('input', () => {
@@ -1300,16 +1446,16 @@ function bindEvents() {
           state.bpm = v;
           document.getElementById('tempo').value = v;
           const lbl = content.querySelector('#mobile-tempo-label');
-          if (lbl) lbl.textContent = v < 70 ? '매우 느린' : v < 100 ? '느린' : v < 130 ? '보통' : v < 160 ? '빠른' : '매우 빠른';
+          if (lbl) lbl.textContent = `${v} BPM`;
         });
-        content.querySelector('#mobile-undo')?.addEventListener('click', undo);
+        content.querySelector('#mobile-undo')?.addEventListener('click', () => { undo(); overlay.classList.remove('visible'); });
         content.querySelector('#mobile-clear')?.addEventListener('click', () => {
-          if (state.notes.length && confirm('모든 도형을 지울까요?')) {
+          if (state.notes.length && confirm('모든 노트를 지울까요?')) {
             saveUndoState();
             state.notes = [];
             state.selectedNoteId = null;
-            updateNoteProperties(null);
             render();
+            overlay.classList.remove('visible');
           }
         });
       }
@@ -1323,8 +1469,15 @@ function bindEvents() {
   // Window resize
   window.addEventListener('resize', () => {
     setTimeout(() => {
-      buildPitchLabels();
-      buildBeatLabels();
+      const wasMobile = isMobile;
+      isMobile = window.innerWidth <= 640;
+      if (!isMobile) {
+        buildPitchLabels();
+        buildBeatLabels();
+      }
+      if (isMobile && !wasMobile) {
+        buildStepSequencer();
+      }
       render();
     }, 100);
   });
@@ -1342,23 +1495,15 @@ function setMode(mode) {
 
 // Update the mobile tool indicator strip
 function updateMobileToolIndicator() {
-  const mMode = document.getElementById('m-mode');
   const mShape = document.getElementById('m-shape');
-  const mColor = document.getElementById('m-color');
   const mSize = document.getElementById('m-size');
-  if (!mMode) return;
+  if (!mShape) return;
 
-  const modeNames = { draw: '그리기', select: '선택', erase: '지우개' };
-  mMode.textContent = modeNames[state.currentMode] || state.currentMode;
-
-  const shapeLabels = { circle: '원', square: '사각', triangle: '삼각', diamond: '다이아', star: '별', hexagon: '육각' };
+  const shapeLabels = { circle: 'Sine', square: 'Square', triangle: 'Triangle', diamond: 'Saw', star: 'Bell', hexagon: 'Perc' };
   mShape.textContent = shapeLabels[state.currentShape] || state.currentShape;
 
-  const dot = mColor.querySelector('.color-dot');
-  if (dot) dot.style.background = state.currentColor;
-
   const sizeLabels = { 1: '16분', 2: '8분', 4: '4분', 8: '2분' };
-  mSize.textContent = sizeLabels[state.currentSize] || state.currentSize;
+  if (mSize) mSize.textContent = sizeLabels[state.currentSize] || state.currentSize;
 }
 
 function handleCanvasInteraction(e) {
@@ -1633,21 +1778,28 @@ function placeProgression(prog, degrees, scale) {
 // ====== Start ======
 function init() {
   try {
+    isMobile = window.innerWidth <= 640;
     const canvas = document.getElementById('main-canvas');
-    if (!canvas) {
-      console.error('SoundCanvas: canvas element not found');
-      return;
+    if (canvas) {
+      renderer = new CanvasRenderer(canvas);
     }
-    renderer = new CanvasRenderer(canvas);
 
     buildPitchMap();
-    buildPitchLabels();
-    buildBeatLabels();
+    if (!isMobile) {
+      buildPitchLabels();
+      buildBeatLabels();
+    }
     buildColorPalette();
-    buildChordGuide();
-    updateLayersList();
+    if (!isMobile) {
+      buildChordGuide();
+      updateLayersList();
+    }
     render();
     bindEvents();
+
+    if (isMobile) {
+      buildStepSequencer();
+    }
 
     // Onboarding
     if (!localStorage.getItem('soundcanvas-seen-onboarding')) {
@@ -1656,10 +1808,9 @@ function init() {
       document.getElementById('onboarding').classList.add('hidden');
     }
 
-    console.log('SoundCanvas initialized. Notes:', state.notes.length, 'PitchMap:', state.pitchMap.length, 'Mode:', state.currentMode);
+    console.log('SoundCanvas initialized. Mobile:', isMobile, 'Notes:', state.notes.length);
   } catch (err) {
     console.error('SoundCanvas init error:', err);
-    // Show error visually so mobile users can see it
     const errDiv = document.createElement('div');
     errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:12px;background:red;color:white;font-size:14px;z-index:9999;';
     errDiv.textContent = 'Error: ' + err.message;
