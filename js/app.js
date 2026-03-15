@@ -845,29 +845,47 @@ function bindEvents() {
 
   // Canvas interaction
   let isDragging = false;
-  let dragStartNote = null;
+  let lastDrawnCell = null; // prevent drawing on same cell repeatedly
 
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
+    e.stopPropagation();
+    // Close mobile panel if open
+    const overlay = document.getElementById('mobile-panel-overlay');
+    if (overlay) overlay.classList.remove('visible');
+
+    lastDrawnCell = null;
     handleCanvasInteraction(e);
     isDragging = true;
   });
 
   canvas.addEventListener('pointermove', (e) => {
     if (!isDragging) return;
-    if (state.currentMode === 'draw') {
-      handleCanvasInteraction(e);
+    e.preventDefault();
+    if (state.currentMode === 'draw' || state.currentMode === 'erase') {
+      // Only handle if moved to a new cell
+      const { beatPos, pitchRow } = renderer.canvasToGrid(e.clientX, e.clientY);
+      const cellKey = `${beatPos}-${pitchRow}`;
+      if (cellKey !== lastDrawnCell) {
+        lastDrawnCell = cellKey;
+        handleCanvasInteraction(e);
+      }
     }
   });
 
   canvas.addEventListener('pointerup', () => {
     isDragging = false;
-    dragStartNote = null;
+    lastDrawnCell = null;
   });
 
   canvas.addEventListener('pointerleave', () => {
     isDragging = false;
+    lastDrawnCell = null;
   });
+
+  // Prevent default touch behavior on canvas (critical for mobile)
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
+  canvas.addEventListener('touchmove', (e) => { e.preventDefault(); }, { passive: false });
 
   // Shape buttons
   document.querySelectorAll('.tool-btn[data-shape]').forEach(btn => {
@@ -875,6 +893,7 @@ function bindEvents() {
       document.querySelectorAll('.tool-btn[data-shape]').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.currentShape = btn.dataset.shape;
+      updateMobileToolIndicator();
     });
   });
 
@@ -884,6 +903,7 @@ function bindEvents() {
       document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       state.currentSize = parseInt(btn.dataset.size);
+      updateMobileToolIndicator();
     });
   });
 
@@ -1087,40 +1107,38 @@ function bindEvents() {
       content.innerHTML = '';
 
       if (panel === 'tools') {
-        // Clone shapes + modes
         content.innerHTML = `
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">도형 = 소리 종류</h3>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:16px">
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">음색 (Timbre)</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px">
             ${['circle','square','triangle','diamond','star','hexagon'].map(s => {
-              const names = {circle:'부드러운',square:'전자',triangle:'맑은',diamond:'날카로운',star:'벨',hexagon:'타악기'};
-              return `<button class="tool-btn mobile-shape-btn ${state.currentShape===s?'active':''}" data-shape="${s}" style="padding:12px 4px">
-                <span style="font-size:13px">${names[s]}</span>
+              const names = {circle:'Sine 부드러운',square:'Square 전자',triangle:'Triangle 맑은',diamond:'Saw 날카로운',star:'Bell 벨',hexagon:'Perc 타악기'};
+              return `<button class="tool-btn mobile-shape-btn ${state.currentShape===s?'active':''}" data-shape="${s}" style="padding:14px 6px;min-height:48px">
+                <span style="font-size:12px;font-weight:600">${names[s]}</span>
               </button>`;
             }).join('')}
           </div>
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">크기 = 울림 길이</h3>
-          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:16px">
-            ${[{s:1,l:'톡'},{s:2,l:'보통'},{s:4,l:'길게'},{s:8,l:'깔기'}].map(({s,l}) =>
-              `<button class="size-btn mobile-size-btn ${state.currentSize===s?'active':''}" data-size="${s}" style="padding:10px 4px">
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">음가 (Duration)</h3>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px">
+            ${[{s:1,l:'16분'},{s:2,l:'8분'},{s:4,l:'4분'},{s:8,l:'2분'}].map(({s,l}) =>
+              `<button class="size-btn mobile-size-btn ${state.currentSize===s?'active':''}" data-size="${s}" style="padding:12px 4px;min-height:48px">
                 <div class="size-preview" style="width:${8+s*4}px;height:${8+s*4}px;background:currentColor;border-radius:50%;opacity:0.5"></div>
-                <span>${l}</span>
+                <span style="font-weight:600">${l}</span>
               </button>`
             ).join('')}
           </div>
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">도구</h3>
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px">
-            <button class="mode-btn mobile-mode-btn ${state.currentMode==='draw'?'active':''}" data-mode="draw" style="padding:10px">그리기</button>
-            <button class="mode-btn mobile-mode-btn ${state.currentMode==='select'?'active':''}" data-mode="select" style="padding:10px">선택</button>
-            <button class="mode-btn mobile-mode-btn ${state.currentMode==='erase'?'active':''}" data-mode="erase" style="padding:10px">지우개</button>
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">도구</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+            <button class="mode-btn mobile-mode-btn ${state.currentMode==='draw'?'active':''}" data-mode="draw" style="padding:12px;min-height:44px;font-weight:600">그리기</button>
+            <button class="mode-btn mobile-mode-btn ${state.currentMode==='select'?'active':''}" data-mode="select" style="padding:12px;min-height:44px;font-weight:600">선택</button>
+            <button class="mode-btn mobile-mode-btn ${state.currentMode==='erase'?'active':''}" data-mode="erase" style="padding:12px;min-height:44px;font-weight:600">지우개</button>
           </div>
         `;
-        // Bind mobile shape/size/mode
         content.querySelectorAll('.mobile-shape-btn').forEach(b => {
           b.addEventListener('click', () => {
             content.querySelectorAll('.mobile-shape-btn').forEach(x=>x.classList.remove('active'));
             b.classList.add('active');
             state.currentShape = b.dataset.shape;
-            document.querySelectorAll('#toolbar .tool-btn[data-shape]').forEach(x => x.classList.toggle('active', x.dataset.shape === b.dataset.shape));
+            updateMobileToolIndicator();
           });
         });
         content.querySelectorAll('.mobile-size-btn').forEach(b => {
@@ -1128,6 +1146,7 @@ function bindEvents() {
             content.querySelectorAll('.mobile-size-btn').forEach(x=>x.classList.remove('active'));
             b.classList.add('active');
             state.currentSize = parseInt(b.dataset.size);
+            updateMobileToolIndicator();
           });
         });
         content.querySelectorAll('.mobile-mode-btn').forEach(b => {
@@ -1140,22 +1159,25 @@ function bindEvents() {
       } else if (panel === 'colors') {
         const scale = SCALES[state.musicKey];
         content.innerHTML = `
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">색상 = 높낮이</h3>
-          <div style="display:grid;grid-template-columns:repeat(${Math.min(scale.notes.length, 5)},1fr);gap:8px;margin-bottom:16px">
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">음정 (Pitch) - 색상으로 선택</h3>
+          <div style="display:grid;grid-template-columns:repeat(${Math.min(scale.notes.length, 5)},1fr);gap:10px;margin-bottom:18px">
             ${scale.notes.map((n, i) => {
               const c = NOTE_COLORS[i % NOTE_COLORS.length];
-              return `<div class="color-swatch mobile-color-btn ${state.currentColor===c?'active':''}" data-color="${c}" style="background:${c};aspect-ratio:1;border-radius:10px;cursor:pointer;min-height:44px"></div>`;
+              return `<div class="mobile-color-btn" data-color="${c}" style="background:${c};aspect-ratio:1;border-radius:12px;cursor:pointer;min-height:50px;border:3px solid ${state.currentColor===c?'var(--text-primary)':'transparent'};box-shadow:0 2px 6px rgba(0,0,0,0.1);display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px">
+                <span style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.9);text-shadow:0 1px 2px rgba(0,0,0,0.4)">${n}</span>
+              </div>`;
             }).join('')}
           </div>
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">투명도 = 볼륨</h3>
-          <input type="range" class="styled-range" id="mobile-opacity" min="10" max="100" value="${Math.round(state.currentOpacity*100)}" style="width:100%;margin:8px 0">
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)"><span>여리게</span><span>세게</span></div>
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">셈여림 (Dynamics)</h3>
+          <input type="range" class="styled-range" id="mobile-opacity" min="10" max="100" value="${Math.round(state.currentOpacity*100)}" style="width:100%;margin:10px 0;height:6px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>pp 여리게</span><span>${Math.round(state.currentOpacity*100)}%</span><span>ff 세게</span></div>
         `;
         content.querySelectorAll('.mobile-color-btn').forEach(b => {
           b.addEventListener('click', () => {
-            content.querySelectorAll('.mobile-color-btn').forEach(x=>x.classList.remove('active'));
-            b.classList.add('active');
+            content.querySelectorAll('.mobile-color-btn').forEach(x => x.style.borderColor = 'transparent');
+            b.style.borderColor = 'var(--text-primary)';
             state.currentColor = b.dataset.color;
+            updateMobileToolIndicator();
           });
         });
         const mobileOpacity = content.querySelector('#mobile-opacity');
@@ -1166,23 +1188,23 @@ function bindEvents() {
         }
       } else if (panel === 'props') {
         content.innerHTML = `
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">분위기</h3>
-          <select id="mobile-key" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border-color);font-size:14px;margin-bottom:16px;background:var(--bg-surface)">
-            <option value="C" ${state.musicKey==='C'?'selected':''}>밝은</option>
-            <option value="G" ${state.musicKey==='G'?'selected':''}>따뜻한</option>
-            <option value="D" ${state.musicKey==='D'?'selected':''}>힘찬</option>
-            <option value="F" ${state.musicKey==='F'?'selected':''}>편안한</option>
-            <option value="Am" ${state.musicKey==='Am'?'selected':''}>슬픈</option>
-            <option value="Em" ${state.musicKey==='Em'?'selected':''}>어두운</option>
-            <option value="Dm" ${state.musicKey==='Dm'?'selected':''}>감성적</option>
-            <option value="pentatonic" ${state.musicKey==='pentatonic'?'selected':''}>동양적</option>
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">조성 (Key)</h3>
+          <select id="mobile-key" style="width:100%;padding:12px;border-radius:10px;border:1px solid var(--border-color);font-size:14px;margin-bottom:18px;background:var(--bg-surface);font-weight:500">
+            <option value="C" ${state.musicKey==='C'?'selected':''}>C Major - 밝은</option>
+            <option value="G" ${state.musicKey==='G'?'selected':''}>G Major - 따뜻한</option>
+            <option value="D" ${state.musicKey==='D'?'selected':''}>D Major - 힘찬</option>
+            <option value="F" ${state.musicKey==='F'?'selected':''}>F Major - 편안한</option>
+            <option value="Am" ${state.musicKey==='Am'?'selected':''}>A minor - 슬픈</option>
+            <option value="Em" ${state.musicKey==='Em'?'selected':''}>E minor - 어두운</option>
+            <option value="Dm" ${state.musicKey==='Dm'?'selected':''}>D minor - 감성적</option>
+            <option value="pentatonic" ${state.musicKey==='pentatonic'?'selected':''}>Pentatonic - 동양적</option>
           </select>
-          <h3 style="font-size:13px;font-weight:600;margin-bottom:10px">속도</h3>
-          <input type="range" class="styled-range" id="mobile-tempo" min="40" max="240" value="${state.bpm}" style="width:100%;margin:8px 0">
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted)"><span>느리게</span><span id="mobile-tempo-label">${state.bpm < 100 ? '느린' : state.bpm < 130 ? '보통' : '빠른'}</span><span>빠르게</span></div>
-          <div style="margin-top:16px;display:flex;gap:8px">
-            <button id="mobile-undo" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--border-color);background:var(--bg-surface);font-size:13px;cursor:pointer">되돌리기</button>
-            <button id="mobile-clear" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(255,59,92,0.3);background:rgba(255,59,92,0.08);color:var(--accent);font-size:13px;cursor:pointer">전체 지우기</button>
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:10px">BPM (속도)</h3>
+          <input type="range" class="styled-range" id="mobile-tempo" min="40" max="240" value="${state.bpm}" style="width:100%;margin:10px 0;height:6px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);font-weight:500"><span>Largo</span><span id="mobile-tempo-label">${state.bpm} BPM</span><span>Presto</span></div>
+          <div style="margin-top:18px;display:flex;gap:8px">
+            <button id="mobile-undo" style="flex:1;padding:12px;border-radius:10px;border:1px solid var(--border-color);background:var(--bg-surface);font-size:13px;cursor:pointer;font-weight:600;min-height:44px">되돌리기</button>
+            <button id="mobile-clear" style="flex:1;padding:12px;border-radius:10px;border:1px solid rgba(255,59,92,0.3);background:rgba(255,59,92,0.08);color:var(--accent);font-size:13px;cursor:pointer;font-weight:600;min-height:44px">전체 지우기</button>
           </div>
         `;
         const mobileKey = content.querySelector('#mobile-key');
@@ -1245,6 +1267,28 @@ function setMode(mode) {
   });
   const canvas = document.getElementById('main-canvas');
   canvas.className = `mode-${mode}`;
+  updateMobileToolIndicator();
+}
+
+// Update the mobile tool indicator strip
+function updateMobileToolIndicator() {
+  const mMode = document.getElementById('m-mode');
+  const mShape = document.getElementById('m-shape');
+  const mColor = document.getElementById('m-color');
+  const mSize = document.getElementById('m-size');
+  if (!mMode) return;
+
+  const modeNames = { draw: '그리기', select: '선택', erase: '지우개' };
+  mMode.textContent = modeNames[state.currentMode] || state.currentMode;
+
+  const shapeLabels = { circle: '원', square: '사각', triangle: '삼각', diamond: '다이아', star: '별', hexagon: '육각' };
+  mShape.textContent = shapeLabels[state.currentShape] || state.currentShape;
+
+  const dot = mColor.querySelector('.color-dot');
+  if (dot) dot.style.background = state.currentColor;
+
+  const sizeLabels = { 1: '16분', 2: '8분', 4: '4분', 8: '2분' };
+  mSize.textContent = sizeLabels[state.currentSize] || state.currentSize;
 }
 
 function handleCanvasInteraction(e) {
