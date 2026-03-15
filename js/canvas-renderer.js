@@ -22,8 +22,15 @@ class CanvasRenderer {
   _setupResizeObserver() {
     const wrapper = this.canvas.parentElement;
     if (!wrapper) return;
-    const ro = new ResizeObserver(() => this._resize());
-    ro.observe(wrapper);
+    this._resizeObserver = new ResizeObserver(() => this._resize());
+    this._resizeObserver.observe(wrapper);
+  }
+
+  destroy() {
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
+    }
   }
 
   _resize() {

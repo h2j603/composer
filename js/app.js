@@ -1220,7 +1220,8 @@ function importProject(file) {
         state.layers = project.layers || state.layers;
         state.bpm = project.bpm || 120;
         state.musicKey = project.musicKey || 'C';
-        state.noteIdCounter = Math.max(...state.notes.map(n => parseInt(n.id.split('-')[1]) || 0), state.noteIdCounter);
+        const noteIds = state.notes.map(n => parseInt(n.id.split('-')[1]) || 0);
+        state.noteIdCounter = noteIds.length > 0 ? Math.max(...noteIds, state.noteIdCounter) : state.noteIdCounter;
 
         document.getElementById('tempo').value = state.bpm;
         document.getElementById('music-key').value = state.musicKey;
@@ -1250,6 +1251,7 @@ function bindEvents() {
 
   // Show visual tap feedback on canvas
   function showTapFeedback(clientX, clientY) {
+    if (!wrapper) return;
     const rect = wrapper.getBoundingClientRect();
     const dot = document.createElement('div');
     dot.className = 'tap-feedback';
@@ -1407,7 +1409,7 @@ function bindEvents() {
   document.getElementById('btn-rewind').addEventListener('click', () => {
     stopPlayback();
     const wrapper = document.getElementById('canvas-scroll-wrapper');
-    wrapper.scrollLeft = 0;
+    if (wrapper) wrapper.scrollLeft = 0;
   });
   document.getElementById('btn-loop').addEventListener('click', (e) => {
     state.loopEnabled = !state.loopEnabled;

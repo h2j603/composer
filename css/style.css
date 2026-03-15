@@ -942,7 +942,7 @@ html, body {
   font-weight: 700;
   color: var(--text-secondary);
   cursor: pointer;
-  min-height: 30px;
+  min-height: 44px;
 }
 .mobile-bpm-btn::after {
   content: 'bpm';
