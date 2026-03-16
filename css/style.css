@@ -1560,7 +1560,7 @@ html, body {
 }
 
 /* ====== iPhone Landscape Mode ====== */
-@media (max-width: 900px) and (max-height: 500px) and (orientation: landscape) {
+@media (max-height: 550px) and (orientation: landscape) {
   :root {
     --topbar-height: 38px;
     --toolbar-width: 0px;

@@ -246,7 +246,7 @@ function generateExample() {
 let renderer;
 let animFrameId;
 let isMobile = window.innerWidth <= 640;
-let isLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 500;
+let isLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 550;
 let seqCurrentBar = 0; // which 4-beat bar is shown in step sequencer
 const SEQ_BEATS_PER_BAR = 4;
 const SEQ_TOTAL_BARS = 8;
@@ -2170,7 +2170,7 @@ function bindEvents() {
       const wasMobile = isMobile;
       const wasLandscape = isLandscape;
       isMobile = window.innerWidth <= 640;
-      isLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 500;
+      isLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 550;
 
       // Landscape phones should use mobile/sequencer UI
       const useMobileUI = isMobile || isLandscape;
