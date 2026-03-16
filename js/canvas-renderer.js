@@ -11,7 +11,7 @@ class CanvasRenderer {
     // Grid settings
     this.cellWidth = 40;   // pixels per beat subdivision
     this.cellHeight = 24;  // pixels per pitch row
-    this.totalBeats = 32;  // 8 bars of 4 beats
+    this.totalBeats = 32;  // default, updated dynamically
     this.totalPitchRows = 24;
     this.gridOffsetX = 0;
 
@@ -22,8 +22,15 @@ class CanvasRenderer {
   _setupResizeObserver() {
     const wrapper = this.canvas.parentElement;
     if (!wrapper) return;
-    const ro = new ResizeObserver(() => this._resize());
-    ro.observe(wrapper);
+    this._resizeObserver = new ResizeObserver(() => this._resize());
+    this._resizeObserver.observe(wrapper);
+  }
+
+  destroy() {
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
+    }
   }
 
   _resize() {
@@ -240,6 +247,8 @@ class CanvasRenderer {
    */
   canvasToGrid(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
+    // clientX/Y are viewport coordinates, rect.left/top are viewport coordinates of canvas
+    // This gives us the position relative to the canvas element
     const x = clientX - rect.left;
     const y = clientY - rect.top;
 

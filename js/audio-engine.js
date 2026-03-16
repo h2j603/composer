@@ -43,10 +43,11 @@ class AudioEngine {
     this.isInitialized = true;
   }
 
-  async _createReverb(duration, decay) {
-    const sampleRate = this.ctx.sampleRate;
+  async _createReverb(duration, decay, ctx) {
+    const audioCtx = ctx || this.ctx;
+    const sampleRate = audioCtx.sampleRate;
     const length = sampleRate * duration;
-    const impulse = this.ctx.createBuffer(2, length, sampleRate);
+    const impulse = audioCtx.createBuffer(2, length, sampleRate);
 
     for (let ch = 0; ch < 2; ch++) {
       const channel = impulse.getChannelData(ch);
@@ -55,16 +56,16 @@ class AudioEngine {
       }
     }
 
-    const convolver = this.ctx.createConvolver();
+    const convolver = audioCtx.createConvolver();
     convolver.buffer = impulse;
 
-    const dry = this.ctx.createGain();
+    const dry = audioCtx.createGain();
     dry.gain.value = 0.7;
-    const wet = this.ctx.createGain();
+    const wet = audioCtx.createGain();
     wet.gain.value = 0.3;
 
-    const input = this.ctx.createGain();
-    const output = this.ctx.createGain();
+    const input = audioCtx.createGain();
+    const output = audioCtx.createGain();
 
     input.connect(dry);
     input.connect(convolver);
@@ -305,15 +306,18 @@ class AudioEngine {
     const length = Math.ceil(sampleRate * (totalDuration + 1));
     const offline = new OfflineAudioContext(2, length, sampleRate);
 
-    // Recreate audio graph in offline context
+    // Recreate audio graph in offline context (including reverb)
     const compressor = offline.createDynamicsCompressor();
     compressor.threshold.value = -24;
     compressor.ratio.value = 4;
 
+    const reverb = await this._createReverb(1.5, 0.3, offline);
+
     const masterGain = offline.createGain();
     masterGain.gain.value = 0.7;
 
-    compressor.connect(masterGain);
+    compressor.connect(reverb.input);
+    reverb.output.connect(masterGain);
     masterGain.connect(offline.destination);
 
     // Schedule notes in offline context
