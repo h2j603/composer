@@ -85,9 +85,12 @@ const state = {
   pitchMap: [], // maps row index to {name, freq}
 };
 
+const BUILD_TIME = '2026-03-16T22:00:00+09:00';
+
 let renderer;
 let animFrameId;
 let isMobile = window.innerWidth <= 640;
+let isLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 500;
 let seqCurrentBar = 0; // which 4-beat bar is shown in step sequencer
 const SEQ_BEATS_PER_BAR = 4;
 const SEQ_TOTAL_BARS = 8;
@@ -1925,21 +1928,33 @@ function bindEvents() {
 
   // Mobile panel closing is now handled inside the canvas handleTap function
 
-  // Window resize
-  window.addEventListener('resize', () => {
+  // Window resize + orientation change
+  const handleResize = () => {
     setTimeout(() => {
       const wasMobile = isMobile;
+      const wasLandscape = isLandscape;
       isMobile = window.innerWidth <= 640;
-      if (!isMobile) {
+      isLandscape = window.innerWidth > window.innerHeight && window.innerHeight <= 500;
+
+      // Landscape phones should use mobile/sequencer UI
+      const useMobileUI = isMobile || isLandscape;
+
+      if (!useMobileUI) {
         buildPitchLabels();
         buildBeatLabels();
       }
-      if (isMobile && !wasMobile) {
+      if (useMobileUI && (!wasMobile && !wasLandscape)) {
+        buildStepSequencer();
+      }
+      // Rebuild sequencer when switching between portrait and landscape for size changes
+      if (isLandscape !== wasLandscape && useMobileUI) {
         buildStepSequencer();
       }
       render();
     }, 100);
-  });
+  };
+  window.addEventListener('resize', handleResize);
+  window.addEventListener('orientationchange', handleResize);
 }
 
 function setMode(mode) {
@@ -2256,7 +2271,7 @@ function init() {
     render();
     bindEvents();
 
-    if (isMobile) {
+    if (isMobile || isLandscape) {
       buildStepSequencer();
     }
 
@@ -2276,7 +2291,15 @@ function init() {
       renderer._resize();
     }
 
-    console.log('SoundCanvas initialized. Mobile:', isMobile, 'Notes:', state.notes.length);
+    // Build stamp
+    const stampEl = document.getElementById('build-stamp');
+    if (stampEl) {
+      const d = new Date(BUILD_TIME);
+      const pad = n => String(n).padStart(2, '0');
+      stampEl.textContent = `v${d.getFullYear()}.${pad(d.getMonth()+1)}.${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    console.log('SoundCanvas initialized. Mobile:', isMobile, 'Landscape:', isLandscape, 'Notes:', state.notes.length);
   } catch (err) {
     console.error('SoundCanvas init error:', err);
     const errDiv = document.createElement('div');
