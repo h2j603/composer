@@ -155,14 +155,14 @@ function parseCodeComposition(text) {
   return notes;
 }
 
-function applyCodeComposition(text) {
+function applyCodeComposition(text, skipUndo) {
   const parsed = parseCodeComposition(text);
   if (parsed.length === 0) {
     showToast('입력된 노트가 없습니다');
     return;
   }
 
-  saveUndoState();
+  if (!skipUndo) saveUndoState();
   const loopOffset = currentLoopSection * BEATS_PER_LOOP;
 
   for (const p of parsed) {
@@ -235,7 +235,7 @@ function generateExample() {
   const loopEnd = loopStart + BEATS_PER_LOOP;
   state.notes = state.notes.filter(n => n.beatPos < loopStart || n.beatPos >= loopEnd);
 
-  applyCodeComposition(example.code);
+  applyCodeComposition(example.code, true); // skipUndo=true, already saved above
   showToast(`예시: ${example.name}`);
 
   // Also put the code in the input for reference
@@ -364,7 +364,7 @@ function render() {
   if (renderer) {
     renderer.render(state.notes, state.selectedNoteId, state.activeLayerId, state.layers);
   }
-  if (isMobile) {
+  if (isMobile || isLandscape) {
     renderStepSequencer();
   }
 }
@@ -975,7 +975,7 @@ function undo() {
   state.selectedNoteId = null;
   updateNoteProperties(null);
   render();
-  if (isMobile) buildStepSequencer();
+  if (isMobile || isLandscape) buildStepSequencer();
 }
 
 function redo() {
@@ -993,7 +993,7 @@ function redo() {
     updateCanvasTotalBeats();
   }
   render();
-  if (isMobile) buildStepSequencer();
+  if (isMobile || isLandscape) buildStepSequencer();
 }
 
 // ====== Layers ======
@@ -1518,7 +1518,7 @@ function applyPreset(presetName) {
   }
 
   render();
-  if (isMobile) renderStepSequencer();
+  if (isMobile || isLandscape) renderStepSequencer();
 }
 
 // ====== Export ======
