@@ -1081,6 +1081,7 @@ html, body {
   display: flex;
   overflow: hidden;
   min-height: 0;
+  touch-action: pan-x pan-y;
 }
 
 .seq-pitch-labels {
@@ -1123,6 +1124,7 @@ html, body {
   -webkit-overflow-scrolling: touch;
   position: relative;
   min-height: 0;
+  touch-action: pan-x pan-y;
 }
 
 /* Beat number row (sticky top) */
@@ -1181,6 +1183,7 @@ html, body {
   padding: 0;
   flex-shrink: 0;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 .seq-cell.bar-start {
   border-left: 2px solid var(--grid-line-strong);
