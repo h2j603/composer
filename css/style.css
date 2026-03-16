@@ -966,7 +966,8 @@ html, body {
   }
   .logo { display: none; }
   .transport-controls { gap: 3px; }
-  .top-actions .action-btn:not(.export-btn) { display: none; }
+  .top-actions .action-btn:not(.export-btn):not(.mobile-keep) { display: none; }
+  .mobile-keep { width: 28px; height: 28px; }
   .separator { display: none; }
   .play-btn { width: 38px; height: 38px; }
   .transport-btn { width: 30px; height: 30px; }
@@ -1203,10 +1204,36 @@ html, body {
   display: block;
 }
 
+.seq-cell {
+  overflow: visible;
+}
 .seq-dot {
   display: none;
   position: absolute;
-  inset: 3px;
+  top: 3px;
+  left: 3px;
+  bottom: 3px;
+  right: 3px;
+  border-radius: 4px;
+  z-index: 2;
+  pointer-events: none;
+}
+/* Multi-cell note: start */
+.seq-cell.note-start .seq-dot {
+  border-radius: 4px 0 0 4px;
+}
+/* Multi-cell note: middle */
+.seq-cell.note-mid .seq-dot {
+  border-radius: 0;
+  left: 0;
+}
+/* Multi-cell note: end */
+.seq-cell.note-end .seq-dot {
+  border-radius: 0 4px 4px 0;
+  left: 0;
+}
+/* Single cell note (no spanning) */
+.seq-cell.note-single .seq-dot {
   border-radius: 4px;
 }
 
@@ -1369,6 +1396,146 @@ html, body {
 }
 .color-swatch { position: relative; }
 
+/* ====== Code Compose Bar ====== */
+#code-compose-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+#code-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  transition: border-color 0.15s;
+}
+#code-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(255,59,92,0.1);
+}
+#code-input::placeholder {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.code-apply-btn {
+  padding: 8px 16px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius);
+  color: white;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+}
+.code-apply-btn:hover { background: var(--accent-light); }
+.code-help-btn {
+  width: 30px;
+  height: 30px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+.code-help-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+@media (max-width: 640px) {
+  #code-compose-bar { padding: 4px 8px; gap: 4px; }
+  #code-input { padding: 6px 8px; font-size: 12px; }
+  .code-apply-btn { padding: 6px 12px; font-size: 11px; }
+  .code-help-btn { width: 26px; height: 26px; font-size: 11px; }
+}
+
+/* ====== Toast Notification ====== */
+.toast-notification {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: var(--text-primary);
+  color: white;
+  padding: 10px 20px;
+  border-radius: 24px;
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9000;
+  transition: opacity 0.3s, transform 0.3s;
+  box-shadow: var(--shadow-lg);
+  white-space: nowrap;
+}
+.toast-notification.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ====== Example Button ====== */
+.preset-example {
+  background: var(--accent-soft) !important;
+  color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  font-weight: 600 !important;
+}
+
+/* ====== Preset Applied Animation ====== */
+.preset-btn.applied {
+  animation: presetPulse 0.6s ease;
+}
+@keyframes presetPulse {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.1); background: var(--accent); color: white; }
+  100% { transform: scale(1); }
+}
+
+/* ====== Code Help Modal ====== */
+.code-help-content {
+  font-size: 12px;
+  line-height: 1.8;
+}
+.code-help-content code {
+  background: var(--bg-surface);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--accent);
+}
+.code-help-content h4 {
+  font-size: 13px;
+  margin: 12px 0 6px;
+  font-weight: 700;
+}
+.code-help-content .example-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0;
+}
+.code-help-content .example-code {
+  background: var(--bg-surface);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: monospace;
+  font-size: 11px;
+  flex: 1;
+}
+
 /* ====== Build Stamp ====== */
 #build-stamp {
   position: fixed;
@@ -1410,7 +1577,8 @@ html, body {
   .key-control { display: none; }
   .tempo-control { display: none; }
   .mobile-bpm-btn { display: flex; align-items: center; min-height: 32px; font-size: 11px; padding: 2px 6px; }
-  .top-actions .action-btn:not(.export-btn) { display: none; }
+  .top-actions .action-btn:not(.export-btn):not(.mobile-keep) { display: none; }
+  .mobile-keep { width: 28px; height: 28px; }
   .separator { display: none; }
   .export-btn { padding: 0 8px; font-size: 10px; height: 28px; }
   .export-btn span { display: none; }
@@ -1517,6 +1685,12 @@ html, body {
   .modal-content h2 { font-size: 15px; margin-bottom: 12px; }
   .export-options { grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .export-option { padding: 12px 8px; }
+
+  /* Code bar compact in landscape */
+  #code-compose-bar { padding: 3px 6px; gap: 3px; }
+  #code-input { padding: 4px 8px; font-size: 11px; }
+  .code-apply-btn { padding: 4px 10px; font-size: 10px; }
+  .code-help-btn { width: 24px; height: 24px; font-size: 10px; }
 
   /* Build stamp adjusted */
   #build-stamp {

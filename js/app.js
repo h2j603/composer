@@ -85,7 +85,163 @@ const state = {
   pitchMap: [], // maps row index to {name, freq}
 };
 
-const BUILD_TIME = '2026-03-16T22:00:00+09:00';
+const BUILD_TIME = '2026-03-17T01:00:00+09:00';
+
+// ====== Toast Notification ======
+function showToast(message, duration = 2000) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.classList.add('visible');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => toast.classList.remove('visible'), duration);
+}
+
+// ====== Code-Based Composition Parser ======
+function parseCodeComposition(text) {
+  if (!text.trim()) return [];
+  const tokens = text.replace(/\|/g, '').trim().split(/\s+/);
+  const notes = [];
+  const noteRegex = /^(\[?)([A-Ga-g][#b]?)(\d)(?:\/(\d+))?(\]?)$/;
+  let currentBeat = 0;
+  let chordGroup = false;
+  let chordBeat = 0;
+
+  for (const token of tokens) {
+    if (token === '_' || token === '-') {
+      currentBeat += 1;
+      continue;
+    }
+
+    // Handle chord brackets
+    let inner = token;
+    const startsChord = inner.startsWith('[');
+    const endsChord = inner.includes(']');
+    if (startsChord) { chordGroup = true; chordBeat = currentBeat; inner = inner.replace('[', ''); }
+    if (endsChord) inner = inner.replace(']', '');
+
+    // Parse duration suffix: /4 = quarter(1beat), /8 = eighth(0.5), /2 = half(2), /1 = whole(4), /16 = sixteenth(0.25)
+    let duration = 1; // default = quarter note = 1 beat
+    const parts = inner.split('/');
+    const notePart = parts[0];
+    if (parts[1]) {
+      const d = parseInt(parts[1]);
+      if (d === 1) duration = 4;
+      else if (d === 2) duration = 2;
+      else if (d === 4) duration = 1;
+      else if (d === 8) duration = 0.5;
+      else if (d === 16) duration = 0.25;
+    }
+
+    // Parse note name and octave
+    const match = notePart.match(/^([A-Ga-g][#b]?)(\d)$/);
+    if (!match) continue;
+
+    const noteName = match[1].charAt(0).toUpperCase() + match[1].slice(1);
+    const octave = parseInt(match[2]);
+    const beatPos = chordGroup ? chordBeat : currentBeat;
+
+    notes.push({ noteName, octave, duration, beatPos });
+
+    if (!chordGroup) {
+      currentBeat += duration;
+    }
+
+    if (endsChord) {
+      chordGroup = false;
+      currentBeat = chordBeat + duration;
+    }
+  }
+  return notes;
+}
+
+function applyCodeComposition(text) {
+  const parsed = parseCodeComposition(text);
+  if (parsed.length === 0) {
+    showToast('입력된 노트가 없습니다');
+    return;
+  }
+
+  saveUndoState();
+  const loopOffset = currentLoopSection * BEATS_PER_LOOP;
+
+  for (const p of parsed) {
+    const fullName = `${p.noteName}${p.octave}`;
+    const pitchRowIdx = state.pitchMap.findIndex(pm => pm.name === fullName);
+    if (pitchRowIdx < 0) continue;
+
+    const pitch = state.pitchMap[pitchRowIdx];
+    const beatPos = loopOffset + p.beatPos;
+
+    // Size factor in beats
+    const sizeFactor = p.duration;
+    const scaleIdx = SCALES[state.musicKey].notes.indexOf(p.noteName);
+
+    const note = {
+      id: `note-${++state.noteIdCounter}`,
+      layerId: state.activeLayerId,
+      beatPos,
+      pitchRow: pitchRowIdx,
+      shape: state.currentShape,
+      color: scaleIdx >= 0 ? NOTE_COLORS[scaleIdx % NOTE_COLORS.length] : state.currentColor,
+      sizeFactor,
+      opacity: state.currentOpacity,
+      pitchName: pitch.name,
+      frequency: pitch.freq,
+    };
+
+    // Overlap check
+    const overlap = state.notes.find(n =>
+      n.layerId === note.layerId && n.pitchRow === note.pitchRow &&
+      n.beatPos < note.beatPos + note.sizeFactor && note.beatPos < n.beatPos + n.sizeFactor
+    );
+    if (!overlap) state.notes.push(note);
+  }
+
+  render();
+  if (isMobile || isLandscape) renderStepSequencer();
+  showToast(`${parsed.length}개 노트가 추가되었습니다`);
+}
+
+// ====== Example Melodies ======
+const EXAMPLE_MELODIES = [
+  {
+    name: '작은 별 (Twinkle Twinkle)',
+    code: 'C4 C4 G4 G4 | A4 A4 G4/2 | F4 F4 E4 E4 | D4 D4 C4/2 | G4 G4 F4 F4 | E4 E4 D4/2 | G4 G4 F4 F4 | E4 E4 D4/2 | C4 C4 G4 G4 | A4 A4 G4/2 | F4 F4 E4 E4 | D4 D4 C4/2'
+  },
+  {
+    name: '캐논 코드 (Canon in C)',
+    code: '[C4 E4 G4]/2 [G3 B3 D4]/2 | [A3 C4 E4]/2 [E3 G3 B3]/2 | [F3 A3 C4]/2 [C4 E4 G4]/2 | [F3 A3 C4]/2 [G3 B3 D4]/2'
+  },
+  {
+    name: '봄 (Spring Melody)',
+    code: 'E4 F4 G4 E4 | F4 G4 A4/2 | G4 F4 E4 D4 | C4/2 _/2 | E4 F4 G4 E4 | A4 G4 F4/2 | E4 D4 C4 D4 | C4/2 _/2'
+  },
+  {
+    name: '재즈 리프 (Jazz Riff)',
+    code: 'C4/8 D4/8 E4/8 G4/8 A4/4 G4/4 | E4/8 D4/8 C4/4 _/4 A3/4 | C4/8 E4/8 G4/4 A4/8 G4/8 E4/4 | D4/2 _/2'
+  },
+  {
+    name: '미니멀 아르페지오',
+    code: 'C4/8 E4/8 G4/8 C5/8 G4/8 E4/8 C4/8 E4/8 | D4/8 F4/8 A4/8 D5/8 A4/8 F4/8 D4/8 F4/8 | E4/8 G4/8 B4/8 E5/8 B4/8 G4/8 E4/8 G4/8 | C4/8 E4/8 G4/8 C5/8 G4/8 E4/8 C4/4'
+  }
+];
+
+function generateExample() {
+  const example = EXAMPLE_MELODIES[Math.floor(Math.random() * EXAMPLE_MELODIES.length)];
+  saveUndoState();
+  // Clear current loop section first
+  const loopStart = currentLoopSection * BEATS_PER_LOOP;
+  const loopEnd = loopStart + BEATS_PER_LOOP;
+  state.notes = state.notes.filter(n => n.beatPos < loopStart || n.beatPos >= loopEnd);
+
+  applyCodeComposition(example.code);
+  showToast(`예시: ${example.name}`);
+
+  // Also put the code in the input for reference
+  const codeInput = document.getElementById('code-input');
+  if (codeInput) codeInput.value = example.code;
+}
 
 let renderer;
 let animFrameId;
@@ -443,9 +599,11 @@ function buildStepSequencer() {
       const pitchRowIdx = getPitchRowForSeq(pitch);
       const stepSize = 1 / seqSubdivision;
 
+      // Find note covering this position (start or continuation)
       const existing = state.notes.find(n =>
         n.pitchRow === pitchRowIdx &&
-        Math.abs(n.beatPos - beatPos) < 0.01
+        beatPos >= n.beatPos - 0.01 &&
+        beatPos < n.beatPos + n.sizeFactor - 0.01
       );
 
       if (existing) {
@@ -454,6 +612,8 @@ function buildStepSequencer() {
         render();
         renderStepSequencer();
       } else {
+        // Use state.currentSize mapped to beats
+        const sizeFactor = state.currentSize * stepSize;
         const note = {
           id: `note-${++state.noteIdCounter}`,
           layerId: state.activeLayerId,
@@ -461,7 +621,7 @@ function buildStepSequencer() {
           pitchRow: pitchRowIdx,
           shape: state.currentShape,
           color: NOTE_COLORS[pitch.scaleIndex % NOTE_COLORS.length],
-          sizeFactor: stepSize,
+          sizeFactor,
           opacity: state.currentOpacity,
           pitchName: pitch.name,
           frequency: pitch.freq,
@@ -657,23 +817,42 @@ function renderStepSequencer() {
 
     const pitchRowIdx = getPitchRowForSeq(pitch);
 
-    // Find note at exactly this beat position
+    // Find note that covers this beat position (start or continuation)
     const note = state.notes.find(n =>
       n.pitchRow === pitchRowIdx &&
-      Math.abs(n.beatPos - beatPos) < 0.01
+      beatPos >= n.beatPos - 0.01 &&
+      beatPos < n.beatPos + n.sizeFactor - 0.01
     );
 
     const dot = cell.querySelector('.seq-dot');
+
+    // Clear previous state
+    cell.classList.remove('active', 'note-start', 'note-mid', 'note-end', 'note-single');
+
     if (note) {
       cell.classList.add('active');
       dot.style.display = 'block';
       dot.style.background = note.color;
       dot.style.opacity = Math.max(0.4, note.opacity);
-      // Scale dot size: 60% at min velocity → 100% at max
+
+      const stepSize = 1 / seqSubdivision;
+      const totalCells = Math.round(note.sizeFactor / stepSize);
+      const isStart = Math.abs(beatPos - note.beatPos) < 0.01;
+
+      if (totalCells <= 1) {
+        cell.classList.add('note-single');
+      } else if (isStart) {
+        cell.classList.add('note-start');
+      } else if (beatPos + stepSize >= note.beatPos + note.sizeFactor - 0.01) {
+        cell.classList.add('note-end');
+      } else {
+        cell.classList.add('note-mid');
+      }
+
+      // Scale dot size by velocity
       const scale = 0.6 + note.opacity * 0.4;
-      dot.style.transform = `scale(${scale})`;
+      dot.style.transform = `scale(1, ${scale})`;
     } else {
-      cell.classList.remove('active');
       dot.style.display = 'none';
       dot.style.transform = '';
     }
@@ -1710,10 +1889,35 @@ function bindEvents() {
   document.getElementById('export-json').addEventListener('click', exportProject);
 
   // Presets
-  document.querySelectorAll('.preset-btn').forEach(btn => {
+  document.querySelectorAll('.preset-btn[data-preset]').forEach(btn => {
     btn.addEventListener('click', () => {
       applyPreset(btn.dataset.preset);
+      btn.classList.add('applied');
+      setTimeout(() => btn.classList.remove('applied'), 600);
+      showToast(`"${btn.textContent}" 패턴이 추가되었습니다`);
     });
+  });
+
+  // Example generation
+  document.getElementById('btn-example')?.addEventListener('click', () => {
+    generateExample();
+  });
+
+  // Code input
+  document.getElementById('code-apply')?.addEventListener('click', () => {
+    const input = document.getElementById('code-input');
+    if (input && input.value.trim()) {
+      applyCodeComposition(input.value);
+    }
+  });
+  document.getElementById('code-input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      document.getElementById('code-apply')?.click();
+    }
+  });
+  document.getElementById('code-help-btn')?.addEventListener('click', () => {
+    showCodeHelp();
   });
 
   // Keyboard shortcuts
@@ -1863,6 +2067,38 @@ function bindEvents() {
             if (lbl) lbl.textContent = mobileOpacity.value + '%';
           });
         }
+      } else if (panel === 'code') {
+        content.innerHTML = `
+          <h3 style="font-size:14px;font-weight:700;margin-bottom:8px">코드 입력 (Code Input)</h3>
+          <p style="font-size:11px;color:var(--text-muted);margin-bottom:10px;line-height:1.5">노트를 텍스트로 입력하세요. 예: C4 D4 E4 G4</p>
+          <textarea id="mobile-code-input" style="width:100%;height:80px;padding:10px;border:1px solid var(--border-color);border-radius:8px;font-family:monospace;font-size:13px;background:var(--bg-surface);resize:vertical" placeholder="C4 D4 E4 G4 | A4 G4 E4/2 C4" spellcheck="false"></textarea>
+          <div style="display:flex;gap:6px;margin:10px 0">
+            <button id="mobile-code-apply" style="flex:1;padding:10px;background:var(--accent);color:white;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer">적용</button>
+            <button id="mobile-code-example" style="flex:1;padding:10px;background:var(--bg-surface);border:1px solid var(--border-color);border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;color:var(--text-secondary)">예시 생성</button>
+          </div>
+          <div style="background:var(--bg-surface);border-radius:8px;padding:10px;font-size:11px;line-height:1.7;color:var(--text-secondary)">
+            <div style="font-weight:700;margin-bottom:4px;color:var(--text-primary)">문법 가이드</div>
+            <div><code style="color:var(--accent)">C4 D4 E4</code> — 음이름+옥타브 (4분음표)</div>
+            <div><code style="color:var(--accent)">C4/2</code> — 2분음표 (2비트)</div>
+            <div><code style="color:var(--accent)">C4/8</code> — 8분음표 (½비트)</div>
+            <div><code style="color:var(--accent)">[C4 E4 G4]</code> — 코드 (동시 연주)</div>
+            <div><code style="color:var(--accent)">_</code> — 쉼표 (1비트)</div>
+            <div><code style="color:var(--accent)">|</code> — 마디선 (시각용)</div>
+          </div>
+        `;
+        content.querySelector('#mobile-code-apply')?.addEventListener('click', () => {
+          const input = content.querySelector('#mobile-code-input');
+          if (input && input.value.trim()) {
+            applyCodeComposition(input.value);
+          }
+        });
+        content.querySelector('#mobile-code-example')?.addEventListener('click', () => {
+          generateExample();
+          const input = content.querySelector('#mobile-code-input');
+          const codeInput = document.getElementById('code-input');
+          if (input && codeInput) input.value = codeInput.value;
+          overlay.classList.remove('visible');
+        });
       } else if (panel === 'settings') {
         content.innerHTML = `
           <h3 style="font-size:14px;font-weight:700;margin-bottom:12px">조성 (Key)</h3>
@@ -2247,6 +2483,50 @@ function placeProgression(prog, degrees, scale) {
   });
 
   render();
+}
+
+// ====== Code Help Modal ======
+function showCodeHelp() {
+  const modal = document.getElementById('export-modal');
+  const content = modal.querySelector('.modal-content');
+  const origHTML = content.innerHTML;
+
+  content.innerHTML = `
+    <button class="modal-close" id="code-help-close">&times;</button>
+    <h2>코드 입력 문법</h2>
+    <div class="code-help-content">
+      <h4>기본 음 입력</h4>
+      <div class="example-row"><div class="example-code">C4 D4 E4 G4</div><span>4분음표 연속</span></div>
+
+      <h4>음표 길이 지정</h4>
+      <div class="example-row"><div class="example-code">C4/1</div><span>온음표 (4비트)</span></div>
+      <div class="example-row"><div class="example-code">C4/2</div><span>2분음표 (2비트)</span></div>
+      <div class="example-row"><div class="example-code">C4/4</div><span>4분음표 (1비트, 기본)</span></div>
+      <div class="example-row"><div class="example-code">C4/8</div><span>8분음표 (½비트)</span></div>
+      <div class="example-row"><div class="example-code">C4/16</div><span>16분음표 (¼비트)</span></div>
+
+      <h4>코드 (동시 연주)</h4>
+      <div class="example-row"><div class="example-code">[C4 E4 G4]</div><span>C 메이저 코드</span></div>
+      <div class="example-row"><div class="example-code">[C4 E4 G4]/2</div><span>2분음표 코드</span></div>
+
+      <h4>기타</h4>
+      <div class="example-row"><div class="example-code">_</div><span>쉼표 (1비트)</span></div>
+      <div class="example-row"><div class="example-code">|</div><span>마디선 (시각 구분)</span></div>
+      <div class="example-row"><div class="example-code">C#4 Bb3</div><span>샵(#), 플랫(b) 사용</span></div>
+
+      <h4>전체 예시</h4>
+      <div class="example-code" style="padding:8px;margin:4px 0;font-size:12px;line-height:1.5">C4 C4 G4 G4 | A4 A4 G4/2 | F4 F4 E4 E4 | D4 D4 C4/2</div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:4px">↑ 작은 별 (Twinkle Twinkle)</p>
+    </div>
+  `;
+  modal.style.display = '';
+
+  content.querySelector('#code-help-close')?.addEventListener('click', () => {
+    modal.style.display = 'none';
+    content.innerHTML = origHTML;
+    // Re-bind modal close
+    content.querySelector('#modal-close')?.addEventListener('click', () => modal.style.display = 'none');
+  });
 }
 
 // ====== Start ======
